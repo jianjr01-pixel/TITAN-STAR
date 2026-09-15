@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "import:month": "node scripts/import-month.js",
+    "import:supplement": "node scripts/import-model-supplement.js",
+    "build": "node build.js",
+    "import:wireless": "node scripts/import-wireless-overview.js"
+  },
+  "devDependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

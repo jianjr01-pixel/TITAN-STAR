@@ -1,268 +1,961 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STAR-lj AI 維修視覺化分析系統</title>
-    <!-- 引入樣式庫與圖表庫 -->
-    <style>
-        body { font-family: "Segoe UI", Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 1100px; margin: 0 auto; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0066cc; padding-bottom: 10px; margin-bottom: 20px; }
-        .upload-zone { border: 2px dashed #0066cc; padding: 30px; text-align: center; background: #f0f7ff; border-radius: 8px; cursor: pointer; }
-        .btn { background: #0066cc; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; }
-        .btn:hover { background: #004c99; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .ai-box { background: #f8f9fa; border-left: 4px solid #0066cc; padding: 15px; border-radius: 0 8px 8px 0; font-size: 15px; line-height: 1.6; white-space: pre-line; }
-        input[type="text"] { width: 300px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-    </style>
-    <!-- 1. SheetJS (讀取 Excel) -->
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <!-- 2. Chart.js (繪製圖表) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<meta charset="UTF-8">
+<!-- 內部工具，不供搜尋引擎收錄。刻意不用 robots.txt：擋掉爬取會讓 Google 看不到本 noindex，網址反而可能以「僅網址」形式留在索引。 -->
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#161d28">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TITAN-STAR">
+<link rel="manifest" href="manifest.json">
+<title>TITAN-STAR · 維修分析</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Iansui&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=20260908-1">
+<link rel="stylesheet" href="rma-styles.css?v=20260908-1">
+<link rel="stylesheet" href="styles-morandi.css?v=20260908-1" id="morandiThemeLink">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <h2>◈ STAR-lj 維修視覺化 & AI 診斷系統</h2>
-        <div>
-            <label>Gemini API Key: </label>
-            <input type="password" id="apiKey" placeholder="貼上免費的 Gemini API Key">
-        </div>
-    </div>
-
-    <!-- 上傳區塊 -->
-    <div class="card">
-        <div class="upload-zone" onclick="document.getElementById('excelFile').click()">
-            📊 <b>點擊上傳月度維修報表 (.xlsx / .xls)</b>
-            <p style="color: #666; font-size: 13px; margin-top: 5px;">資料直接在您的瀏覽器本機端解析，不需傳送至外部伺服器儲存</p>
-            <input type="file" id="excelFile" accept=".xlsx, .xls" style="display:none">
-        </div>
-        <div id="statusMsg" style="margin-top: 10px; font-weight: bold; text-align: center;"></div>
-    </div>
-
-    <!-- 分析結果區域 (預設隱藏) -->
-    <div id="dashboard" style="display: none;">
-        
-        <!-- AI 智慧主管摘要 -->
-        <div class="card">
-            <h3>💡 AI 品質工程師 - 主管摘要與改善建議</h3>
-            <div id="aiSummary" class="ai-box">正在等待 AI 分析數據...</div>
-        </div>
-
-        <!-- 圖表分析區 -->
-        <div class="grid-2">
-            <div class="card">
-                <h3>❖ 機種故障件數排名 TOP 5</h3>
-                <canvas id="modelChart"></canvas>
-            </div>
-            <div class="card">
-                <h3>🧩 主要更換零件 Pareto 分布</h3>
-                <canvas id="partChart"></canvas>
-            </div>
-        </div>
-    </div>
+<!-- ═══════════════ Login Screen ═══════════════ -->
+<div id="loginScreen" style="display:none;position:fixed;inset:0;z-index:900;background:var(--bg);align-items:center;justify-content:center;flex-direction:column">
+  <div style="text-align:center;margin-bottom:32px">
+    <div class="s-icon" style="margin:0 auto 16px;width:52px;height:52px;font-size:22px;line-height:52px">S</div>
+    <div style="font-size:22px;font-weight:700;letter-spacing:0.05em">TITAN-STAR</div>
+    <div style="font-size:13px;color:var(--text2);margin-top:4px">維修分析系統</div>
+  </div>
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px;width:320px;max-width:90vw">
+    <div style="font-size:15px;font-weight:600;margin-bottom:20px">請輸入員工編號登入</div>
+    <input id="loginUser" type="text" placeholder="請輸入員工編號"
+      style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:15px;margin-bottom:12px"
+      onkeydown="if(event.key==='Enter')Auth.doLogin()">
+    <input id="loginPwd" type="hidden" value="">
+    <div id="loginErr" style="color:#e55;font-size:13px;min-height:18px;margin-bottom:8px"></div>
+    <button class="btn primary" onclick="Auth.doLogin()" style="width:100%;padding:10px;font-size:15px">登入</button>
+  </div>
 </div>
 
+<!-- ═══════════════ Change Password Screen ═══════════════ -->
+<div id="changePwScreen" style="display:none;position:fixed;inset:0;z-index:900;background:var(--bg);align-items:center;justify-content:center;flex-direction:column">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px;width:340px;max-width:90vw">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">修改密碼</div>
+    <div id="changePwSub" style="font-size:13px;color:var(--text2);margin-bottom:20px"></div>
+    <input id="cpOld" type="password" placeholder="舊密碼"
+      style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
+    <input id="cpNew" type="password" placeholder="新密碼（至少6碼）"
+      style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
+    <input id="cpConfirm" type="password" placeholder="確認新密碼"
+      style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px"
+      onkeydown="if(event.key==='Enter')Auth.doChangePw()">
+    <div id="changePwErr" style="color:#e55;font-size:13px;min-height:18px;margin-bottom:8px"></div>
+    <button class="btn primary" onclick="Auth.doChangePw()" style="width:100%;padding:10px;font-size:15px">確認</button>
+  </div>
+</div>
+
+<!-- ═══════════════ Loading Overlay ═══════════════ -->
+<div class="load-ov" id="loadOv" style="display:none" role="status" aria-live="polite" aria-busy="true">
+  <div class="load-panel">
+    <div class="load-sp" aria-hidden="true"></div>
+    <div class="load-m" id="loadM">處理中…</div>
+    <div class="load-s" id="loadS"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ Mode Switcher Header ═══════════════ -->
+<div class="mode-bar" id="modeBar" style="display:none">
+  <div class="mode-bar-l">
+    <button class="s-icon app-home" type="button" onclick="App.switchPage('summary')" title="回到首頁">S</button>
+  </div>
+  <div class="mode-tabs">
+    <button class="mode-tab active mode-analysis-tab" id="modeAnalysis" onclick="switchMode('analysis')" style="display:none">
+      <span class="mode-tab-ico">◈</span> 維修分析
+    </button>
+    <div class="top-control top-control-model" id="topModelLookup">
+      <span class="top-control-icon">#</span>
+      <label class="top-control-label" for="modelQuickSearch">型號查詢</label>
+      <input class="model-lookup-input top-model-input" id="modelQuickSearch" list="modelLookupList" placeholder="輸入型號，例如 MSM0801 / ZSPMG51"
+        oninput="App.quickModelSearchInput(this.value)"
+        onchange="App.quickModelSearch(this.value)"
+        onkeydown="if(event.key==='Enter')App.quickModelSearch(this.value)">
+      <datalist id="modelLookupList"></datalist>
+    </div>
+    <!-- Role selector embedded next to analysis tab -->
+    <div class="role-sel top-control top-control-role" id="roleSelWrap" style="display:none">
+      <span class="top-control-icon">⊞</span>
+      <span class="top-control-label">角色觀點</span>
+      <!-- Desktop: custom dropdown button -->
+      <button class="role-sel-btn role-sel-desktop" id="roleSelBtn" onclick="App.toggleRoleDropdown()" title="切換分析視角">
+        <span id="roleSelIco">⊞</span>
+        <span id="roleSelLabel">角色觀點：綜合</span>
+        <span class="role-sel-focus" id="roleSelFocus"></span>
+        <span class="role-sel-arrow">▾</span>
+      </button>
+      <div class="role-sel-drop" id="roleSelDrop" style="display:none"></div>
+      <!-- Mobile: native select -->
+      <select class="role-sel-mobile sb-select" id="roleSelMobile" onchange="App.setAnalysisRole(this.value)"></select>
+    </div>
+  </div>
+  <div class="mode-bar-r" id="modeBtns">
+    <button class="btn topbar-btn" id="modeReportBtn" onclick="App.generateRoleReport()" style="display:none">⤓ 生成報告</button>
+    <button class="btn topbar-btn" id="modeExcelBtn" onclick="App.exportReportExcel()" style="display:none" title="匯出 Excel">⬇ Excel</button>
+    <button class="mode-tab" id="modeRma" onclick="switchMode('rma')" style="display:none">
+      <span class="mode-tab-ico">◎</span> RMA
+      <span class="mode-badge" id="rmaBadge" style="display:none">0</span>
+    </button>
+    <button class="btn topbar-btn" id="modeUploadBtn" onclick="App.openUpload()" style="display:none" title="上傳報表">⤒</button>
+    <span class="mode-bar-user" id="modeBarUser"></span>
+    <div class="sys-ctl-group">
+      <button class="btn theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="切換色系">🌙</button>
+    </div>
+    <button class="btn" id="adminPanelBtn" style="display:none" onclick="Auth.openAdminPanel()" title="新增、停用或重設報表登入帳號">⚙ 帳號管理</button>
+  </div>
+</div>
+
+<!-- ═══════════════ UPLOAD ZONE ═══════════════ -->
+<div class="uz" id="uploadZone" style="display:none">
+  <div class="uz-wrap">
+    <div class="uz-brand">
+      <div class="uz-mark">TS</div>
+      <div class="uz-title"><strong>TITAN-STAR</strong> · 維修分析</div>
+    </div>
+
+    <!-- Mode selection before upload -->
+    <div class="uz-mode-row" style="display:none">
+      <div class="uz-mode-card active" id="uzModeA" onclick="uzSelectMode('analysis')">
+        <div class="uz-mode-ico">◈</div>
+        <div class="uz-mode-t">維修分析報表</div>
+        <div class="uz-mode-d">上傳月度 Excel 報表，進行跨月分析、異常偵測、KPI 計算</div>
+      </div>
+      <div class="uz-mode-card" id="uzModeR" onclick="uzSelectMode('rma')">
+        <div class="uz-mode-ico">◎</div>
+        <div class="uz-mode-t">RMA 管理系統</div>
+        <div class="uz-mode-d">建立與追蹤故障品退修案件，無需上傳檔案即可使用</div>
+      </div>
+    </div>
+
+    <!-- Analysis upload card -->
+    <div id="uzAnalysisSection">
+      <div class="uz-card" id="dropZone">
+        <input type="file" id="fileInput" accept=".xlsx,.xls" multiple>
+        <div class="uz-icon">📊</div>
+        <div class="uz-heading">拖曳或點擊上傳月度報表</div>
+        <div class="uz-sub">支援 <span class="k">.xlsx</span> / <span class="k">.xls</span>　可一次上傳多個月份　資料存於本機瀏覽器</div>
+        <div class="uz-btn">選擇檔案</div>
+      </div>
+
+      <div class="uz-months" id="uzMonths" style="display:none">
+        <div id="uzMonthList"></div>
+      </div>
+    </div>
+
+    <!-- RMA quick start -->
+    <div id="uzRmaSection" style="display:none">
+      <div class="uz-card" style="cursor:default;border-style:solid">
+        <div class="uz-icon">◎</div>
+        <div class="uz-heading">RMA 管理系統</div>
+        <div class="uz-sub">不需上傳任何檔案。建立退修案件、追蹤狀態、匯出報表。<br>資料存於本機瀏覽器，下次開啟即可繼續。</div>
+        <div style="margin-top:28px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn primary" onclick="openRmaMode()" style="font-size:14px;padding:12px 28px">進入 RMA 管理 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ ANALYSIS DASHBOARD ═══════════════ -->
+<div class="dash" id="dash">
+
+  <!-- Sub-bar: month + category chips -->
+  <div class="subbar" id="subbar">
+    <div class="subbar-head">
+      <button class="nav-toggle" id="navToggle" onclick="App.toggleNav()" aria-label="開啟選單">☰</button>
+      <button class="subbar-toggle" id="subbarToggle" onclick="App.toggleSubbar()" aria-label="展開/收合篩選">
+        <span id="subbarSummaryText">篩選</span>
+        <span class="subbar-arrow" id="subbarArrow">▲</span>
+      </button>
+    </div>
+    <div id="subbarBody">
+      <!-- Mobile: dropdown selects (≤820px) -->
+      <div class="subbar-mobile-row" id="subbarMobileRow">
+        <select class="sb-select" id="monthSelect" onchange="App.setMonthDirect(this.value)"></select>
+        <select class="sb-select" id="catSelect" onchange="App.setCategory(this.value)"></select>
+      </div>
+      <!-- Desktop: chip rows (>820px) -->
+      <div class="subbar-row subbar-chips-row" id="monthChips"></div>
+      <div class="subbar-row subbar-chips-row" id="catChips"></div>
+      <div class="subbar-row" id="modelChips" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Layout: sidebar + content -->
+  <div class="layout">
+    <!-- Mobile nav overlay -->
+    <div class="nav-overlay" id="navOverlay" onclick="App.closeNav()"></div>
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <button class="sidebar-mini-toggle" id="sidebarMiniToggle" onclick="App.toggleSidebarMini()" title="收合側欄">◁</button>
+      <div class="snav">
+        <div class="snav-h"><span class="snav-lbl">分析</span></div>
+        <button class="snav-item active" data-page="summary" onclick="App.switchPage('summary')" title="今日重點">
+          <div class="snav-l"><span class="snav-ico">★</span><span class="snav-lbl"> 今日重點</span></div>
+          <span class="snav-badge" id="summaryBadge" style="display:none">0</span>
+        </button>
+        <button class="snav-item" data-page="overview" onclick="App.switchPage('overview')" title="總覽">
+          <div class="snav-l"><span class="snav-ico">◈</span><span class="snav-lbl"> 總覽</span></div>
+        </button>
+        <button class="snav-item" data-page="alerts" onclick="App.switchPage('alerts')" title="找異常">
+          <div class="snav-l"><span class="snav-ico">!</span><span class="snav-lbl"> 找異常</span></div>
+          <span class="snav-badge" id="alertBadge" style="display:none">0</span>
+        </button>
+        <button class="snav-item" data-page="parts" onclick="App.switchPage('parts')" title="零件">
+          <div class="snav-l"><span class="snav-ico">▤</span><span class="snav-lbl"> 零件</span></div>
+        </button>
+        <button class="snav-item" data-page="cross" onclick="App.switchPage('cross')" title="跨機種矩陣">
+          <div class="snav-l"><span class="snav-ico">⇄</span><span class="snav-lbl"> 共用零件</span></div>
+        </button>
+        <button class="snav-item" data-page="trend" onclick="App.switchPage('trend')" title="趨勢">
+          <div class="snav-l"><span class="snav-ico">↗</span><span class="snav-lbl"> 趨勢</span></div>
+        </button>
+        <button class="snav-item" data-page="reason" onclick="App.switchPage('reason')" title="原因">
+          <div class="snav-l"><span class="snav-ico">◎</span><span class="snav-lbl"> 原因</span></div>
+        </button>
+        <div class="snav-sep"></div>
+        <div class="snav-h"><span class="snav-lbl">品質工程</span></div>
+        <button class="snav-item" data-page="quality" onclick="App.switchPage('quality')" title="品質指標/SPC">
+          <div class="snav-l"><span class="snav-ico">◈</span><span class="snav-lbl"> 品質</span></div>
+        </button>
+        <button class="snav-item" data-page="batch" onclick="App.switchPage('batch')" title="製造批次分析">
+          <div class="snav-l"><span class="snav-ico">⊞</span><span class="snav-lbl"> 批次</span></div>
+          <span class="snav-badge" id="batchBadge" style="display:none">0</span>
+        </button>
+        <button class="snav-item" data-page="risk" onclick="App.switchPage('risk')" title="風險/根因/預測">
+          <div class="snav-l"><span class="snav-ico">⚠</span><span class="snav-lbl"> 風險</span></div>
+        </button>
+        <button class="snav-item" data-page="capa" onclick="App.switchPage('capa')" title="CAPA 追蹤">
+          <div class="snav-l"><span class="snav-ico">✓</span><span class="snav-lbl"> 改善追蹤</span></div>
+          <span class="snav-badge" id="capaBadge" style="display:none">0</span>
+        </button>
+        <button class="snav-item" data-page="cost" onclick="App.switchPage('cost')" title="成本量化">
+          <div class="snav-l"><span class="snav-ico">$</span><span class="snav-lbl"> 成本</span></div>
+        </button>
+        <div class="snav-sep"></div>
+        <div class="snav-h"><span class="snav-lbl">追蹤</span></div>
+        <button class="snav-item" data-page="scrap" onclick="App.switchPage('scrap')" title="報廢 & 重修">
+          <div class="snav-l"><span class="snav-ico">↻</span><span class="snav-lbl"> 報廢重修</span></div>
+          <span class="snav-badge" id="crossMonthBadge" style="display:none">0</span>
+        </button>
+        <button class="snav-item" data-page="detail" onclick="App.switchPage('detail')" title="明細資料">
+          <div class="snav-l"><span class="snav-ico">≡</span><span class="snav-lbl"> 查資料</span></div>
+        </button>
+        <button class="snav-item" data-page="partsdb" onclick="App.switchPage('partsdb')" title="料件資料庫">
+          <div class="snav-l"><span class="snav-ico">⛁</span><span class="snav-lbl"> 料件</span></div>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <main class="content">
+      <div class="content-inner">
+
+        <section class="monthly-context" id="monthlyContext" aria-label="報表期間與更新狀態">
+          <div class="monthly-context-heading"><div><h2 id="monthlyContextTitle">最新月份分析</h2><p id="monthlyContextNote"></p></div></div>
+          <details class="period-options"><summary title="展開後可切換單月或跨月分析範圍">切換月份與歷史範圍</summary><div class="period-actions" aria-label="選擇分析期間">
+            <button type="button" data-period="1" onclick="App.setPeriod(1)" title="只分析目前最新月份">最新月份</button>
+            <button type="button" data-period="3" onclick="App.setPeriod(3)" title="合併最近 3 個已有資料的月份進行分析">近 3 個月</button>
+            <button type="button" data-period="6" onclick="App.setPeriod(6)" title="合併最近 6 個已有資料的月份進行分析">近 6 個月</button>
+            <button type="button" data-period="12" onclick="App.setPeriod(12)" title="合併最近 12 個已有資料的月份進行分析">近 12 個月</button>
+            <button type="button" data-period="all" onclick="App.setPeriod('all')" title="分析目前匯入的全部月份">全部歷史</button>
+          </div></details>
+          <div class="source-status" id="sourceStatus" data-state="checking"><span id="sourceStatusText" role="status" aria-live="polite">正在檢查維修與整新故障 Excel…</span><button type="button" id="sourceRefresh" onclick="App.refreshSource()" title="立即重新檢查 date 資料夾是否有新增或更正版 Excel">檢查更新</button></div>
+          <p id="sourceWarnings" class="source-warnings"></p>
+          <nav class="report-reading" aria-label="報表閱讀順序"><button onclick="App.switchPage('summary')" title="先看系統整理出的本期優先事項">1 本期重點</button><button onclick="App.switchPage('trend')" title="再確認問題是單月事件或持續趨勢">2 月份趨勢</button><button onclick="App.switchPage('detail')" title="最後下鑽逐筆資料查證型號、原因與零件">3 維修明細</button></nav>
+        </section>
+
+        <!-- Global role switcher (persists across all analysis pages) -->
+        <div class="global-role" id="globalRole">
+          <div id="analysisRoleBar" style="display:none"></div>
+          <div class="grole-banner" id="globalRoleBanner"></div>
+        </div>
+
+        <!-- Manager Summary -->
+        <div class="page active" id="pageSummary">
+          <div class="page-h">
+            <div>
+              <div class="page-t">主管摘要</div>
+              <div class="page-d">依角色彙整全報表的應追蹤事項 · 依嚴重度分層 · 含建議行動與下鑽連結</div>
+            </div>
+            <div class="page-meta" id="summaryMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>開週會 / 月會前快速掌握全廠重點，依你的角色（主管 / 工程 / 品保）查看當期最該追蹤的事項與建議行動。</span></div>
+          <div class="sum-banner" id="sumBanner"></div>
+          <div class="kpi-grid" id="sumKpi"></div>
+          <div id="sumBody"></div>
+        </div>
+
+        <!-- Overview -->
+        <div class="page" id="pageOverview">
+          <div class="page-h">
+            <div>
+              <div class="page-t">總覽</div>
+              <div class="page-d">跨月份維修 KPI · 機種故障率排名 · 最常更換零件</div>
+            </div>
+            <div class="page-meta" id="overviewMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>每次匯入新資料後的第一站，先看當期維修 KPI、機種故障率排名與最常更換零件，建立整體概況再深入各分頁。</span></div>
+          <!-- 型號名稱稽核警示 -->
+          <div id="modelAuditBanner"></div>
+          <!-- Role Insight Panel -->
+          <div class="ri-panel" id="roleInsightPanel"></div>
+          <div class="kpi-grid" id="kpiGrid"></div>
+          <div class="card sec" id="comparePanel" style="margin-top:16px"></div>
+          <div class="sec" style="margin-top:28px">
+            <div class="sec-h">
+              <span class="sec-t"><span class="strong">異常警示</span> 本期最新</span>
+            </div>
+            <div class="alert-strip" id="alertStrip"></div>
+          </div>
+          <div class="sec">
+            <div class="sec-h">
+              <span class="sec-t"><span class="strong">機種故障排名</span></span>
+              <span class="page-meta" id="rankMeta"></span>
+            </div>
+            <div id="machineRank"></div>
+          </div>
+          <div class="sec">
+            <div class="sec-h"><span class="sec-t"><span class="strong">最常更換零件</span> 前 8</span></div>
+            <div class="card">
+              <div class="barlist" id="topPartsGrid"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="page" id="pageAlerts">
+          <div class="page-h">
+            <div>
+              <div class="page-t">異常偵測</div>
+              <div class="page-d">新出現零件 · 用量暴增 · 高故障率機種 · 跨月重複維修</div>
+            </div>
+            <div class="page-meta" id="alertsMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>想快速揪出當月「不對勁」的訊號時使用 — 零件用量暴增、新出現的高頻故障、故障率偏高的機種或跨月重複維修，依嚴重 / 注意 / 提醒分級排查。</span></div>
+          <div class="anom-grid" id="anomGrid"></div>
+        </div>
+
+        <!-- Parts -->
+        <div class="page" id="pageParts">
+          <div class="page-h">
+            <div>
+              <div class="page-t">零件 Pareto 分析</div>
+              <div class="page-d">依件數排序 · 累計佔比 · 跨機種分布</div>
+            </div>
+            <div class="page-meta" id="partsMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>規劃備料安全庫存、或要找出「最該優先改善」的關鍵零件時使用 — 依件數排序與累計佔比，鎖定造成多數故障的少數零件。</span></div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">🧩 故障零件大類根因</div><div class="card-sub">依元件料號大類歸類 · 看故障性質（連接器 / 電源 / IC / 開關 / 機構…）</div></div>
+            <div class="comp-cat-wrap">
+              <div class="chart-wrap"><canvas id="componentCatChart"></canvas></div>
+              <div class="comp-cat-list" id="componentCatList"></div>
+            </div>
+          </div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">📊 零件件數 Pareto</div></div>
+            <div class="chart-wrap tall"><canvas id="paretoChart"></canvas></div>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width:36px">#</th>
+                  <th>零件名稱</th>
+                  <th>影響機種</th>
+                  <th class="right" style="width:80px">件數</th>
+                  <th class="right" style="width:100px" title="本月 vs 上月用量環比">較上月</th>
+                  <th style="width:220px">佔比 / 累計</th>
+                  <th class="right" style="width:90px" title="建議安全庫存量（月均用量×2）">建議備料</th>
+                  <th style="width:80px">詳情</th>
+                </tr>
+              </thead>
+              <tbody id="paretoBody"></tbody>
+            </table>
+          </div>
+          <!-- 維修作業記錄（非實體料件，不計入備料建議） -->
+          <div id="workNotePanel"></div>
+        </div>
+
+        <!-- Cross model -->
+        <div class="page" id="pageCross">
+          <div class="page-h">
+            <div>
+              <div class="page-t">跨機種零件矩陣</div>
+              <div class="page-d">同一零件影響 ≥ 2 個機種 · 可能為共用料件缺陷</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div class="page-meta" id="crossMeta"></div>
+              <button class="btn" onclick="App.exportCrossMatrix()">⤓ Excel</button>
+            </div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>懷疑某零件是「共用料件缺陷」、想確認其影響範圍時使用 — 列出同一零件跨 ≥ 2 個機種出現的情形，判斷是否為料件本身問題。</span></div>
+          <div class="matrix-wrap" id="crossMatrix"></div>
+        </div>
+
+        <!-- Trend -->
+        <div class="page" id="pageTrend">
+          <div class="page-h">
+            <div>
+              <div class="page-t">月份趨勢</div>
+              <div class="page-d">維修件數 · 故障率 · 主要零件走勢（全月份）</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <label class="trend-toggle" title="各月納入的機種數不同，開啟後只統計每個月都有的機種，件數才能直接比較">
+                <input type="checkbox" id="trendCommonOnly" checked onchange="App.setTrendCommonOnly(this.checked)">
+                <span>只看每月都有的機種</span>
+              </label>
+              <div class="page-meta" id="trendMeta"></div>
+            </div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>想看長期走勢、判斷問題正在惡化還是改善時使用 — 跨全月份比較維修件數、故障率與主要零件的月度變化。</span></div>
+          <div id="trendCoverageNotice"></div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">維修件數 vs 報廢件數</div></div>
+            <div class="chart-wrap"><canvas id="trendCountChart"></canvas></div>
+          </div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">故障率 (%)</div></div>
+            <div class="chart-wrap"><canvas id="trendRateChart"></canvas></div>
+          </div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">主要零件月份趨勢 (前 6)</div></div>
+            <div class="chart-wrap tall"><canvas id="partTrendChart"></canvas></div>
+          </div>
+          <div class="sec" id="trendMomTable"></div>
+        </div>
+
+        <!-- Reason -->
+        <div class="page" id="pageReason">
+          <div class="page-h">
+            <div>
+              <div class="page-t">故障原因分析</div>
+              <div class="page-d">故障大類分布 · 故障內容排名</div>
+            </div>
+            <div class="page-meta" id="reasonMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>想了解故障的「性質」與根因分布、決定改善方向時使用 — 看故障大類佔比與故障內容排名，找出最常見的失效模式。</span></div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">故障大類</div></div>
+            <div class="chart-wrap"><canvas id="reasonChart"></canvas></div>
+          </div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">故障內容 TOP 10</div></div>
+            <div class="chart-wrap"><canvas id="contentChart"></canvas></div>
+          </div>
+          <div class="sec" id="reasonTaxSection">
+            <div class="card-h"><div class="card-t">故障部位分佈（月度對比）</div></div>
+            <div class="chart-wrap"><canvas id="reasonTaxChart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Scrap -->
+        <div class="page" id="pageScrap">
+          <div class="page-h">
+            <div>
+              <div class="page-t">報廢 &amp; 重複維修</div>
+              <div class="page-d">跨月份重複維修 · 同月重修 · 報廢機種</div>
+            </div>
+            <div class="page-meta" id="scrapMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>追蹤重工 / 報廢損失、揪出「修了又壞」的序號時使用 — 檢視跨月份重複維修、同月重修與報廢機種，評估維修品質。</span></div>
+          <div class="sec">
+            <div class="sec-h"><span class="sec-t"><span class="strong">跨月份重複維修</span></span></div>
+            <div id="crossMonthSection"></div>
+          </div>
+          <div class="grid-2">
+            <div class="sec">
+              <div class="sec-h"><span class="sec-t"><span class="strong">報廢紀錄</span></span></div>
+              <div id="scrapList"></div>
+            </div>
+            <div class="sec">
+              <div class="sec-h"><span class="sec-t"><span class="strong">本期重複維修</span></span></div>
+              <div id="repeatList"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quality metrics + SPC -->
+        <div class="page" id="pageQuality">
+          <div class="page-h">
+            <div>
+              <div class="page-t">品質指標體系</div>
+              <div class="page-d">DPPM · FPY 直通率 · 重工率 · SPC 管制圖</div>
+            </div>
+            <div class="page-meta" id="qualityMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>向上彙報品質績效、或監控製程是否失控時使用 — 看 DPPM、FPY 直通率、重工率，並用 SPC 管制圖判斷故障率是否超出管制界線。</span></div>
+          <div class="kpi-grid" id="qualityKpi"></div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">SPC 故障率管制圖（p-chart）</div></div>
+            <div class="chart-wrap tall"><canvas id="spcChart"></canvas></div>
+            <div id="spcNote" class="spc-note"></div>
+          </div>
+          <div class="card sec" id="dqHeatmap"></div>
+        </div>
+
+        <!-- Manufacture batch analysis -->
+        <div class="page" id="pageBatch">
+          <div class="page-h">
+            <div>
+              <div class="page-t">製造批次分析</div>
+              <div class="page-d">製令(出廠批次) + 製造日期(整新) · 全新/整新研判 · 元件瑕疵落點 · 製程梯次</div>
+            </div>
+            <div class="page-meta" id="batchMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>懷疑特定「出廠批次」或「整新批次」有系統性瑕疵時使用 — 研判全新 / 整新故障佔比、找出故障集中的元件批次與製程梯次。</span></div>
+          <div id="batchNotice" style="display:none"></div>
+          <!-- 製令落點分析（生產序號＝製令批次號） -->
+          <div id="orderLotPanel"></div>
+          <div class="kpi-grid" id="batchKpi"></div>
+          <div class="batch-2col">
+            <div class="card sec">
+              <div class="card-h"><div class="card-t">🆕 全新 vs ♻ 整新 故障佔比</div></div>
+              <div class="chart-wrap short"><canvas id="conditionChart"></canvas></div>
+              <div class="batch-note" id="conditionNote"></div>
+            </div>
+            <div class="card sec">
+              <div class="card-h"><div class="card-t">🏭 出廠批次分析（元件瑕疵落點）</div><div class="card-sub">依製令出廠年月 · 故障集中的原始批次=元件/製程瑕疵</div></div>
+              <div class="chart-wrap short"><canvas id="originBatchChart"></canvas></div>
+              <div class="batch-note" id="originNote"></div>
+            </div>
+          </div>
+          <div class="card sec">
+            <div class="card-h"><div class="card-t">⚠ 批次風險機種</div><div class="card-sub">出廠/整新單月佔比≥40%=批次集中；全新且出廠月=檢修月=全新早夭；整新且整新月=檢修月=整新後即壞</div></div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th style="width:34px">#</th>
+                    <th>機種</th>
+                    <th class="right" style="width:60px">維修</th>
+                    <th style="width:110px">全新/整新</th>
+                    <th>最大出廠批次</th>
+                    <th>最大製造批次</th>
+                    <th class="right" style="width:140px">早夭</th>
+                    <th style="width:130px">標記</th>
+                  </tr>
+                </thead>
+                <tbody id="batchBody"></tbody>
+              </table>
+            </div>
+            <div class="batch-note" id="batchNote"></div>
+          </div>
+        </div>
+
+        <!-- FMEA / Root cause -->
+        <div class="page" id="pageRisk">
+          <div class="page-h">
+            <div>
+              <div class="page-t">風險與根因分析</div>
+              <div class="page-d">FMEA / RPN 風險評分 · 故障根因樹 · 下月預測</div>
+            </div>
+            <div class="page-meta" id="riskMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>做正式 FMEA 風險評估、排定改善優先序、或預估下月趨勢時使用 — 依 RPN 風險評分排序，並透過根因樹追溯部位 → 故障模式。</span></div>
+          <div class="card sec" id="forecastCard"></div>
+          <div class="sec">
+            <div class="sec-h"><span class="sec-t"><span class="strong">FMEA 風險矩陣</span> 依 RPN 排序</span></div>
+            <div id="fmeaTable"></div>
+          </div>
+          <div class="sec">
+            <div class="sec-h"><span class="sec-t"><span class="strong">故障根因樹</span> 部位 → 模式</span></div>
+            <div id="rootCauseTree"></div>
+          </div>
+          <div class="sec" id="hwPartPareto"></div>
+          <div class="sec">
+            <div id="dataQualityPanel"></div>
+          </div>
+        </div>
+
+        <!-- CAPA -->
+        <div class="page" id="pageCapa">
+          <div class="page-h">
+            <div>
+              <div class="page-t">CAPA 矯正預防措施</div>
+              <div class="page-d">問題 → 負責人 → 截止日 → 狀態追蹤</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div class="page-meta" id="capaMeta"></div>
+              <button class="btn primary" onclick="App.openCapaForm()" title="建立一項需指定負責人、期限並持續追蹤的矯正預防措施">+ 新增 CAPA</button>
+            </div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>針對重大異常或反覆故障開立「矯正預防措施」並追蹤到底時使用 — 從異常偵測 / 風險分析按「+CAPA」帶入問題，指派負責人與截止日，持續追蹤改善狀態直到關閉。</span></div>
+          <div class="capa-kpi-row" id="capaKpiRow"></div>
+          <div id="capaList"></div>
+        </div>
+
+        <!-- Cost -->
+        <div class="page" id="pageCost">
+          <div class="page-h">
+            <div>
+              <div class="page-t">成本量化</div>
+              <div class="page-d">報廢成本 · 維修工時成本 · 各類別損失</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div class="page-meta" id="costMeta"></div>
+              <button class="btn" onclick="App.openCostConfig()">⚙ 單價設定</button>
+            </div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>要把故障 / 報廢換算成「金額」、向管理層證明改善效益時使用 — 設定單價後，量化報廢成本、維修工時成本與各類別損失。</span></div>
+          <div id="costContent"></div>
+        </div>
+
+        <!-- Detail -->
+        <div class="page" id="pageDetail">
+          <div class="page-h">
+            <div>
+              <div class="page-t">維修明細</div>
+              <div class="page-d">原始記錄瀏覽（前 500 筆）</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="detail-search-inp" type="text" id="detailSearch" placeholder="🔍 序號 / 機種 / 故障原因…" oninput="App.searchDetail(this.value)">
+              <button class="btn sm" onclick="App.exportDetailCsv()" title="匯出當前篩選結果為 CSV">⤓ 匯出 CSV</button>
+              <div class="page-meta" id="detailMeta"></div>
+            </div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>需要查核某筆原始記錄、或匯出特定條件資料時使用 — 以序號 / 機種 / 故障原因搜尋逐筆明細，並可匯出 CSV 做進一步分析。</span></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>月份</th><th>日期</th><th>機種</th><th>序號</th>
+                  <th>故障原因</th><th>故障內容</th><th>零件</th>
+                </tr>
+              </thead>
+              <tbody id="detailBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ═══ 料件資料庫 ═══ -->
+        <div class="page" id="pagePartsdb">
+          <div class="page-h">
+            <div>
+              <div class="page-t">料件資料庫</div>
+              <div class="page-d">品號主檔 · 群組歸類管理 · 讓非內部人員也看得懂零件</div>
+            </div>
+            <div class="page-meta" id="partsdbMeta"></div>
+          </div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>查詢料件的白話類別（如電容、電阻），或維護品號歸類。報表各處的零件會自動標上這裡的類別標籤。</span></div>
+          <div class="card" style="margin-bottom:16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input class="ls-input" type="text" id="pdbSearch" placeholder="🔍 品號 / 品名 / 規格…" oninput="App.pdbSearch()" style="flex:1;min-width:200px">
+              <select class="fsc-sel" id="pdbCatSel" onchange="App.pdbSearch()" style="min-width:140px"></select>
+              <button class="btn primary" onclick="App.pdbOpenEdit()">＋ 新增料件</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width:110px">品號</th>
+                  <th>品名</th>
+                  <th>規格</th>
+                  <th style="width:130px">群組(大類)</th>
+                  <th style="width:110px">操作</th>
+                </tr>
+              </thead>
+              <tbody id="pdbBody"></tbody>
+            </table>
+          </div>
+          <div class="muted" id="pdbMore" style="margin-top:10px;font-size:12px"></div>
+        </div>
+
+        <!-- 料件編輯 modal -->
+        <div id="pdbModal" class="ap-overlay" style="display:none" onclick="if(event.target===this)App.pdbCloseEdit()">
+          <div class="ap-box" style="max-width:460px">
+            <div class="ap-hdr">
+              <div class="ap-title" id="pdbModalTitle">編輯料件</div>
+              <button class="ap-close" onclick="App.pdbCloseEdit()">✕</button>
+            </div>
+            <div class="ap-body" style="display:flex;flex-direction:column;gap:10px">
+              <input class="ls-input" id="pdbFpno" placeholder="品號（如 1050001）">
+              <input class="ls-input" id="pdbFname" placeholder="品名（如 電解電容）">
+              <input class="ls-input" id="pdbFspec" placeholder="規格（如 100µF 25V）">
+              <select class="ls-input" id="pdbFcat"></select>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn" onclick="App.pdbCloseEdit()">取消</button>
+                <button class="btn primary" onclick="App.pdbSaveEdit()">儲存</button>
+              </div>
+              <div class="muted" style="font-size:11.5px">變更儲存在本機；管理員「發布」後全員同步。</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- content-inner -->
+    </main>
+  </div><!-- layout -->
+
+</div><!-- dash -->
+
+<!-- ═══════════════ RMA MODE ═══════════════ -->
+<div id="rmaDash" style="display:none">
+  <!-- RMA Header -->
+  <div class="hdr">
+    <div class="hdr-l">
+      <div class="hdr-t"><span class="sub">RMA 管理</span></div>
+    </div>
+    <div class="hdr-r">
+      <button class="btn primary" onclick="RMA.goNew()">+ 新增 RMA</button>
+    </div>
+  </div>
+  <div style="padding:32px;max-width:1400px;margin:0 auto" id="rmaContent">
+    <!-- RMA module renders here -->
+  </div>
+</div>
+
+<!-- ═══════════════ Drill-down Drawer ═══════════════ -->
+<div class="drawer-mask" id="drawerMask" onclick="App.closeDrawer()"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawerS" tabindex="-1">
+  <div class="drawer-h">
+    <div class="drawer-h-l">
+      <div class="drawer-ico" id="drawerIco">i</div>
+      <div class="drawer-h-t-wrap">
+        <div class="drawer-t" id="drawerT"></div>
+        <div class="drawer-s" id="drawerS"></div>
+      </div>
+    </div>
+    <button class="drawer-close" onclick="App.closeDrawer()" aria-label="關閉詳細資料抽屜">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<!-- RMA Modal container -->
+<div id="rmaModal" style="display:none;position:fixed;inset:0;z-index:600;align-items:center;justify-content:center"></div>
+
+<script src="parser.js?v=20260908-1"></script>
+<script src="analyzer.js?v=20260908-1"></script>
+<script src="privacy.js?v=20260908-1"></script>
+<script src="monthly-source.js?v=20260908-1"></script>
+<script src="app.js?v=20260908-1"></script>
+<script src="report.js?v=20260908-1"></script>
+<script src="rma.js?v=20260908-1"></script>
 <script>
-let modelChartInst = null;
-let partChartInst = null;
+// ─── Theme toggle（深色 ↔ 莫蘭迪淺色）───
+const THEME_KEY = 'titan_theme';
+const MORANDI_ID = 'morandiTheme';
 
-// 監聽 Excel 上傳
-document.getElementById('excelFile').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    document.getElementById('statusMsg').innerText = "⏳ 正在讀取並解析 Excel...";
-    
-    const reader = new FileReader();
-    reader.onload = async function(event) {
-        try {
-            const data = new Uint8Array(event.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            
-            // 讀取第一個工作表
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json(sheet);
-
-            if (jsonData.length === 0) {
-                alert("Excel 內沒有發現數據！");
-                return;
-            }
-
-            document.getElementById('statusMsg').innerText = `✅ 成功讀取 ${jsonData.length} 筆維修紀錄！`;
-            document.getElementById('dashboard').style.display = 'block';
-
-            // 1. 本地端資料統計與視覺化
-            processLocalAnalysis(jsonData);
-
-            // 2. 呼叫 AI 進行進階診斷
-            const apiKey = document.getElementById('apiKey').value.trim();
-            if (apiKey) {
-                callGeminiAI(jsonData, apiKey);
-            } else {
-                document.getElementById('aiSummary').innerText = "💡 請在上方的「Gemini API Key」輸入框貼上 Key，即可自動解鎖 AI 品質工程師的主管摘要與 CAPA 改善建議！";
-            }
-
-        } catch (err) {
-            console.error(err);
-            alert("Excel 解析失敗，請檢查欄位格式。");
-        }
-    };
-    reader.readAsArrayBuffer(file);
-});
-
-// 統計數據並繪製圖表
-function processLocalAnalysis(data) {
-    // 假設 Excel 欄位包含「機種」與「零件名稱」(可依實際 Excel 欄位名稱自動彈性調整)
-    const modelCounts = {};
-    const partCounts = {};
-
-    data.forEach(row => {
-        // 尋找可能的欄位名稱
-        const model = row['機種'] || row['型號'] || row['Model'] || '未知機種';
-        const part = row['零件名稱'] || row['零件'] || row['故障零件'] || row['Part'] || '未知零件';
-
-        modelCounts[model] = (modelCounts[model] || 0) + 1;
-        partCounts[part] = (partCounts[part] || 0) + 1;
-    });
-
-    // 排序取得 TOP 5
-    const topModels = Object.entries(modelCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
-    const topParts = Object.entries(partCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
-
-    // 繪製機種圖表
-    renderChart('modelChart', 'bar', topModels.map(x=>x[0]), topModels.map(x=>x[1]), '維修件數', '#0066cc');
-    // 繪製零件圖表
-    renderChart('partChart', 'doughnut', topParts.map(x=>x[0]), topParts.map(x=>x[1]), '更換數量', ['#ff6384', '#36a2eb', '#cc65fe', '#ffce56', '#4bc0c0']);
+function getMorandiNode() {
+  // 兩種型態：dev = <link id="morandiThemeLink">；bundled = 動態注入 <style id="morandiTheme">
+  return document.getElementById('morandiThemeLink') || document.getElementById(MORANDI_ID);
 }
 
-function renderChart(canvasId, type, labels, data, labelName, colors) {
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    if (canvasId === 'modelChart' && modelChartInst) modelChartInst.destroy();
-    if (canvasId === 'partChart' && partChartInst) partChartInst.destroy();
-
-    const chartConfig = {
-        type: type,
-        data: {
-            labels: labels,
-            datasets: [{
-                label: labelName,
-                data: data,
-                backgroundColor: colors
-            }]
-        },
-        options: { responsive: true, plugins: { legend: { display: type !== 'bar' } } }
-    };
-
-    if (canvasId === 'modelChart') modelChartInst = new Chart(ctx, chartConfig);
-    if (canvasId === 'partChart') partChartInst = new Chart(ctx, chartConfig);
-}
-
-// 呼叫 Gemini API (採動態模型偵測，免除 404 硬編碼問題)
-async function callGeminiAI(data, apiKey) {
-    const aiBox = document.getElementById('aiSummary');
-    aiBox.innerText = "🤖 正在向 Google 查詢您的 Key 可用的 AI 模型...";
-
-    // 精簡欄位，節省 Token 並提升成功率
-    const sampleData = data.slice(0, 30).map(item => ({
-        機種: item['機種'] || item['型號'] || item['Model'] || '',
-        故障原因: item['故障原因'] || item['故障描述'] || item['Reason'] || '',
-        零件: item['零件名稱'] || item['零件'] || item['Part'] || ''
-    }));
-
-    const prompt = `你是一位專業的安防設備品質與維修分析工程師。以下是本月維修報表採樣數據：
-${JSON.stringify(sampleData)}
-
-請依據數據回答以下三點，並用繁體中文簡潔回覆：
-1. 【主管摘要】：列出本期最主要的故障機種與核心問題。
-2. 【異常偵測與風險警示】：是否有集中於特定零件或不良模式的跡象？
-3. 【CAPA 建議行動】：針對高頻故障，提出 2 點品質改善或備料建議。`;
-
-    try {
-        // 🔍 階段一：動態向 Google 查詢此 API Key 有權限調用的模型
-        let availableModel = null;
-        let apiVersion = 'v1beta';
-
-        let listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
-            headers: { 'x-goog-api-key': apiKey }
-        });
-
-        if (listRes.ok) {
-            const listData = await listRes.json();
-            if (listData.models && listData.models.length > 0) {
-                // 篩選支援文本產生的模型 (generateContent)
-                const validModels = listData.models.filter(m => 
-                    m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-                );
-                // 優先選擇 flash 類型，無則選第一個可用模型
-                const target = validModels.find(m => m.name.includes('flash')) || validModels[0];
-                if (target) availableModel = target.name;
-            }
-        } else {
-            // 若 v1beta 失敗，嘗試 v1 終端
-            let listResV1 = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`, {
-                headers: { 'x-goog-api-key': apiKey }
-            });
-            if (listResV1.ok) {
-                apiVersion = 'v1';
-                const listDataV1 = await listResV1.json();
-                if (listDataV1.models && listDataV1.models.length > 0) {
-                    const validModels = listDataV1.models.filter(m => 
-                        m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-                    );
-                    const target = validModels.find(m => m.name.includes('flash')) || validModels[0];
-                    if (target) availableModel = target.name;
-                }
-            }
-        }
-
-        // ❌ 若查詢後發現完全沒有任何可用模型
-        if (!availableModel) {
-            aiBox.innerHTML = `<div style="color: #721c24; background-color: #f8d7da; padding: 12px; border-radius: 6px;">` +
-                `<strong>❌ 找不到可用的 AI 模型 (API Key 權限受限)</strong><br><br>` +
-                `Google 回傳您的 Key 目前無法存取 Gemini 模型。請依以下步驟重新申請：<br><br>` +
-                `1. 請前往 <a href="https://aistudio.google.com/" target="_blank" style="color: #0056b3; font-weight: bold;">Google AI Studio</a>。<br>` +
-                `2. 點擊左上角/右上角的 <strong>Get API key</strong>。<br>` +
-                `3. 點擊 <strong>Create API key in new project</strong> 建立全新專用金鑰。<br>` +
-                `4. 複製新金鑰後貼回本頁面重新測試。` +
-                `</div>`;
-            return;
-        }
-
-        // 🚀 階段二：使用動態找到的模型發送分析請求
-        const cleanModelName = availableModel.replace('models/', '');
-        aiBox.innerText = `🤖 成功找到可用模型 (${cleanModelName})，AI 品質工程師分析中...`;
-
-        const targetUrl = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanModelName}:generateContent?key=${apiKey}`;
-
-        const response = await fetch(targetUrl, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'x-goog-api-key': apiKey 
-            },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-
-        const resData = await response.json();
-
-        if (response.ok && resData.candidates && resData.candidates[0] && resData.candidates[0].content) {
-            aiBox.innerText = resData.candidates[0].content.parts[0].text;
-        } else if (resData.error) {
-            aiBox.innerText = `❌ API 分析失敗 (代碼 ${resData.error.code})：\n${resData.error.message}`;
-        } else {
-            aiBox.innerText = "⚠️ AI 收到請求但未產生內容，可能被安全過濾器攔截。";
-        }
-
-    } catch (err) {
-        console.error("連線過程發生錯誤:", err);
-        aiBox.innerText = "❌ 網路連線失敗：" + err.message;
+function applyTheme(theme) {
+  const btn = document.getElementById('themeToggleBtn');
+  let node = getMorandiNode();
+  if (theme === 'morandi') {
+    if (!node) {
+      // bundled 模式：注入 style
+      const style = document.createElement('style');
+      style.id = MORANDI_ID;
+      style.textContent = window.__morandiCSS__ || '';
+      document.head.appendChild(style);
+    } else {
+      node.disabled = false;
     }
+    if (btn) btn.textContent = '☀';
+  } else {
+    if (node) {
+      if (node.tagName === 'LINK') node.disabled = true;   // dev：停用 link
+      else node.remove();                                   // bundled：移除 style
+    }
+    if (btn) btn.textContent = '🌙';
+  }
+}
+
+function isMorandiActive() {
+  const node = getMorandiNode();
+  if (!node) return false;
+  return node.tagName === 'LINK' ? !node.disabled : true;
+}
+
+function toggleTheme() {
+  const next = isMorandiActive() ? 'dark' : 'morandi';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+// 初始化：讀取儲存的主題
+(function() {
+  const saved = localStorage.getItem(THEME_KEY) || 'morandi'; // 預設莫蘭迪
+  applyTheme(saved);
+})();
+
+// ─── Mode switching ───
+let currentMode = 'analysis';
+let uzMode = 'analysis';
+
+function uzSelectMode(mode) {
+  mode = 'analysis';
+  uzMode = mode;
+  document.getElementById('uzModeA').classList.toggle('active', mode === 'analysis');
+  const uzModeR = document.getElementById('uzModeR');
+  if (uzModeR) uzModeR.classList.toggle('active', false);
+  document.getElementById('uzAnalysisSection').style.display = mode === 'analysis' ? '' : 'none';
+  document.getElementById('uzRmaSection').style.display = mode === 'rma' ? '' : 'none';
+}
+
+function openRmaMode() {
+  switchMode('analysis');
+}
+
+function switchMode(mode) {
+  if (mode === 'rma') mode = 'analysis';
+  currentMode = mode;
+  const modeAnalysis = document.getElementById('modeAnalysis');
+  if (modeAnalysis) modeAnalysis.classList.toggle('active', mode === 'analysis');
+  const modeRma = document.getElementById('modeRma');
+  if (modeRma) {
+    modeRma.classList.toggle('active', false);
+    modeRma.style.display = 'none';
+  }
+  const canMaintainData = (() => {
+    try {
+      const session = JSON.parse(sessionStorage.getItem('titan_session') || 'null');
+      return !!(session && session.isAdmin);
+    } catch(e) {
+      return false;
+    }
+  })();
+
+  const dash = document.getElementById('dash');
+  const rmaDash = document.getElementById('rmaDash');
+  const uploadZone = document.getElementById('uploadZone');
+  const modeBar = document.getElementById('modeBar');
+
+  if (mode === 'analysis') {
+    const db = RepairDB.load();
+    const hasData = Object.keys(db.months).length > 0;
+    if (hasData) {
+      uploadZone.style.display = 'none';
+      dash.classList.add('active');
+      rmaDash.style.display = 'none';
+      modeBar.style.display = 'flex';
+      ['roleSelWrap'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
+      const uploadBtn = document.getElementById('modeUploadBtn');
+      if (uploadBtn) uploadBtn.style.display = 'none';
+    } else {
+      // No data yet — stay in the analysis shell and let App show the cloud-data guide.
+      uploadZone.style.display = 'none';
+      dash.classList.add('active');
+      rmaDash.style.display = 'none';
+      modeBar.style.display = 'flex';
+      if (window.App && App.openDashboardDirect) App.openDashboardDirect();
+    }
+  } else {
+    uploadZone.style.display = 'none';
+    dash.classList.remove('active');
+    rmaDash.style.display = 'block';
+    modeBar.style.display = 'flex';
+    ['modeUploadBtn','modeReportBtn','roleSelWrap'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    const modeRmaEl = document.getElementById('modeRma');
+    if (modeRmaEl) modeRmaEl.style.display = 'none';
+    // Init RMA content container
+    const rmaContent = document.getElementById('rmaContent');
+    if (rmaContent) {
+      RMA.render();
+    }
+    // Badge
+    updateRmaBadge();
+  }
+}
+
+function updateRmaBadge() {
+  const st = RMA.stats();
+  const badge = document.getElementById('rmaBadge');
+  if (badge) {
+    if (st.open > 0) {
+      badge.textContent = st.open;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+// 登入成功後直接進入分析主介面（等雲端資料就緒）
+async function onAuthSuccess() {
+  try { updateRmaBadge(); } catch(e) {}
+
+  const modeBar = document.getElementById('modeBar');
+  const dash    = document.getElementById('dash');
+  const rmaDash = document.getElementById('rmaDash');
+  const uz      = document.getElementById('uploadZone');
+
+  if (modeBar) modeBar.style.display = 'flex';
+  if (uz)      uz.style.display = 'none';
+  if (rmaDash) rmaDash.style.display = 'none';
+  if (dash)    dash.classList.add('active');
+
+  await App.openDashboardDirect();
 }
 </script>
 
+<!-- ═══════════════ Admin Panel Modal ═══════════════ -->
+<div id="adminPanel" class="ap-overlay" style="display:none" onclick="if(event.target===this)Auth.closeAdminPanel()">
+  <div class="ap-box">
+    <div class="ap-hdr">
+      <div class="ap-title">⚙ 帳號管理</div>
+      <button class="ap-close" onclick="Auth.closeAdminPanel()">✕</button>
+    </div>
+    <div class="ap-body">
+      <!-- Add user -->
+      <div class="ap-sec-t">新增帳號</div>
+      <div class="ap-add-row">
+        <input class="ls-input" type="text" id="newUserInput" placeholder="員工編號"
+          onkeydown="if(event.key==='Enter')document.getElementById('newNameInput').focus()"
+          style="flex:0 0 130px">
+        <input class="ls-input" type="text" id="newNameInput" placeholder="姓名（如：陳皇銘）"
+          onkeydown="if(event.key==='Enter')Auth.addUser()"
+          style="flex:1">
+        <button class="btn primary" onclick="Auth.addUser()">新增</button>
+      </div>
+      <div class="ls-err" id="addUserErr" style="margin-bottom:8px"></div>
+      <!-- User list -->
+      <div class="ap-sec-t" style="margin-top:18px">帳號列表</div>
+      <div id="userListEl" class="ap-user-list"></div>
+      <div class="ap-note">重置密碼 → 密碼恢復為帳號名稱，對方下次登入需重設。操作後請記得「☁ 發布到雲端」讓同步生效。</div>
+      <!-- Login log -->
+      <div class="ap-sec-t" style="margin-top:24px;display:flex;align-items:center;justify-content:space-between">
+        <span>登入記錄（本機，最新 60 筆）</span>
+        <button class="btn sm danger" onclick="Auth.clearLoginLogs()">清除</button>
+      </div>
+      <div id="loginLogEl" style="max-height:220px;overflow-y:auto;padding:4px 0"></div>
+    </div>
+  </div>
+</div>
+<script>
+// Service Worker registration (PWA offline support)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[SW] 已更新，下次開啟生效');
+          }
+        });
+      });
+    }).catch(e => console.warn('[SW] 註冊失敗:', e));
+  });
+}
+</script>
 </body>
 </html>
