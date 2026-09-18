@@ -12,16 +12,43 @@
 <meta name="apple-mobile-web-app-title" content="TITAN-STAR">
 <link rel="manifest" href="manifest.json">
 <title>TITAN-STAR · 維修分析</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Iansui&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260908-1">
-<link rel="stylesheet" href="rma-styles.css?v=20260908-1">
-<link rel="stylesheet" href="styles-morandi.css?v=20260908-1" id="morandiThemeLink">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<!-- 離線（file://）直接雙擊開啟時，轉去同資料夾的單檔版 TITAN-STAR.html。
+     原因：瀏覽器禁止 file:// 頁面 fetch 同目錄的 data.json（"URL scheme file
+     is not supported"），所以 index.html 在離線狀態下拿不到任何資料，會是一個
+     空殼。TITAN-STAR.html 由 build.js 把資料與函式庫全部內嵌進去，不需要
+     fetch，複製到任何一台電腦都能開。
+     這段在單檔版裡會被 build.js 移除，所以不會轉址轉不完。
+     放在 <head> 最前面：要在載入 vendor/ 那 1.2MB 之前就決定要不要轉走。 -->
+<script data-file-redirect>
+if (location.protocol === 'file:') location.replace('TITAN-STAR.html');
+</script>
+<!-- Google Fonts 只在有網路的線上版載入。用 JS 動態插入而不是寫死 <link>：
+     離線／file:// 打開時瀏覽器會卡在連線逾時，字體也不會到；直接不要發這個
+     請求，改吃 styles.css 裡的系統字體 fallback（--sans / --mono / --friendly
+     都已經排好 Windows 的微軟正黑體與 macOS 的蘋方）。 -->
+<script>
+(function () {
+  if (location.protocol === 'file:') return;
+  var pre = document.createElement('link');
+  pre.rel = 'preconnect'; pre.href = 'https://fonts.googleapis.com';
+  document.head.appendChild(pre);
+  var l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?family=Iansui&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap';
+  document.head.appendChild(l);
+})();
+</script>
+<link rel="stylesheet" href="styles.css?v=20260918-3">
+<link rel="stylesheet" href="rma-styles.css?v=20260918-3">
+<link rel="stylesheet" href="styles-morandi.css?v=20260918-3" id="morandiThemeLink">
+<!-- 第三方函式庫改為自帶（vendor/），不再走 cdn.jsdelivr.net。
+     理由見 vendor/README.md：離線可用、分頁不會卡在 CDN 逾時、
+     不受公司網路擋 CDN 影響。 -->
+<script src="vendor/chart.umd.js?v=20260918-3"></script>
+<script src="vendor/xlsx.full.min.js?v=20260918-3"></script>
+<script src="vendor/hammer.min.js?v=20260918-3"></script>
+<script src="vendor/chartjs-plugin-zoom.min.js?v=20260918-3"></script>
+<script src="vendor/chartjs-plugin-annotation.min.js?v=20260918-3"></script>
 </head>
 <body>
 
@@ -81,11 +108,15 @@
     <div class="top-control top-control-model" id="topModelLookup">
       <span class="top-control-icon">#</span>
       <label class="top-control-label" for="modelQuickSearch">型號查詢</label>
-      <input class="model-lookup-input top-model-input" id="modelQuickSearch" list="modelLookupList" placeholder="輸入型號，例如 MSM0801 / ZSPMG51"
+      <!-- 自訂建議清單：原生 <datalist> 由瀏覽器繪製，CSS 完全碰不到，
+           在淺色主題上會冒出一塊深色系統面板。改為自製面板才能吃站上的樣式。 -->
+      <input class="model-lookup-input top-model-input" id="modelQuickSearch" placeholder="輸入型號，例如 MSM0801 / ZSPMG51"
+        autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+        aria-controls="modelDrop" aria-haspopup="listbox"
         oninput="App.quickModelSearchInput(this.value)"
-        onchange="App.quickModelSearch(this.value)"
-        onkeydown="if(event.key==='Enter')App.quickModelSearch(this.value)">
-      <datalist id="modelLookupList"></datalist>
+        onfocus="App.openModelSuggest()"
+        onkeydown="App.modelSuggestKey(event)">
+      <div class="model-drop" id="modelDrop" role="listbox" aria-label="型號建議" hidden></div>
     </div>
     <!-- Role selector embedded next to analysis tab -->
     <div class="role-sel top-control top-control-role" id="roleSelWrap" style="display:none">
@@ -183,15 +214,28 @@
       </button>
     </div>
     <div id="subbarBody">
-      <!-- Mobile: dropdown selects (≤820px) -->
-      <div class="subbar-mobile-row" id="subbarMobileRow">
-        <select class="sb-select" id="monthSelect" onchange="App.setMonthDirect(this.value)"></select>
-        <select class="sb-select" id="catSelect" onchange="App.setCategory(this.value)"></select>
+      <!-- 左：只在需要時切換的下拉；右：目前分析範圍總結 -->
+      <div class="subbar-controls">
+        <div class="sb-filters" id="subbarFilters">
+          <div class="sb-filters-h">切換分析範圍</div>
+          <!-- 多選：native multiple 原生就支援 Ctrl／⌘ 點選複選、Shift 選範圍，
+               不用自己寫鍵盤邏輯；手機上點擊即切換，也不需要按鍵。 -->
+          <label class="sb-field sb-field-months"><span class="sb-field-l">月份</span>
+            <span class="sb-months">
+              <select class="sb-select sb-multi" id="monthSelect" multiple
+                onchange="App.setMonthsFromSelect(this)"></select>
+              <span class="sb-months-hint">
+                <button type="button" class="sb-mini-btn" onclick="App.setPeriod('all')">全選</button>
+                <span>按住 Ctrl（Mac ⌘）複選 · Shift 選範圍</span>
+              </span>
+            </span></label>
+          <label class="sb-field"><span class="sb-field-l">大類</span>
+            <select class="sb-select" id="catSelect" onchange="App.setCategory(this.value)"></select></label>
+          <label class="sb-field" id="modelField" style="display:none"><span class="sb-field-l">機種</span>
+            <select class="sb-select" id="modelSelect" onchange="App.setModel(this.value)"></select></label>
+        </div>
+        <div class="sb-scope" id="subbarScope" aria-live="polite"></div>
       </div>
-      <!-- Desktop: chip rows (>820px) -->
-      <div class="subbar-row subbar-chips-row" id="monthChips"></div>
-      <div class="subbar-row subbar-chips-row" id="catChips"></div>
-      <div class="subbar-row" id="modelChips" style="display:none"></div>
     </div>
   </div>
 
@@ -355,11 +399,11 @@
           <div class="page-h">
             <div>
               <div class="page-t">零件 Pareto 分析</div>
-              <div class="page-d">依件數排序 · 累計佔比 · 跨機種分布</div>
+              <div class="page-d">依用量排序 · 累計佔比 · 跨機種分布</div>
             </div>
             <div class="page-meta" id="partsMeta"></div>
           </div>
-          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>規劃備料安全庫存、或要找出「最該優先改善」的關鍵零件時使用 — 依件數排序與累計佔比，鎖定造成多數故障的少數零件。</span></div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>規劃備料安全庫存、或要找出「最該優先改善」的關鍵零件時使用 — 依用量排序與累計佔比，鎖定造成多數故障的少數零件。<b>備料看「用量」，排改善優先序看「維修筆數」</b>：一次維修可能換多顆同料件，兩個數字不一樣。</span></div>
           <div class="card sec">
             <div class="card-h"><div class="card-t">🧩 故障零件大類根因</div><div class="card-sub">依元件料號大類歸類 · 看故障性質（連接器 / 電源 / IC / 開關 / 機構…）</div></div>
             <div class="comp-cat-wrap">
@@ -368,7 +412,7 @@
             </div>
           </div>
           <div class="card sec">
-            <div class="card-h"><div class="card-t">📊 零件件數 Pareto</div></div>
+            <div class="card-h"><div class="card-t">📊 零件用量 Pareto</div><div class="card-sub">長條為零件用量（個），不是維修筆數</div></div>
             <div class="chart-wrap tall"><canvas id="paretoChart"></canvas></div>
           </div>
           <div class="tbl-wrap">
@@ -378,7 +422,7 @@
                   <th style="width:36px">#</th>
                   <th>零件名稱</th>
                   <th>影響機種</th>
-                  <th class="right" style="width:80px">件數</th>
+                  <th class="right" style="width:96px" title="零件用量（個）＝各筆維修的更換數量加總。單次維修換多顆時，下方會另標實際維修筆數">用量（個）</th>
                   <th class="right" style="width:100px" title="本月 vs 上月用量環比">較上月</th>
                   <th style="width:220px">佔比 / 累計</th>
                   <th class="right" style="width:90px" title="建議安全庫存量（月均用量×2）">建議備料</th>
@@ -500,9 +544,10 @@
             <div class="page-meta" id="qualityMeta"></div>
           </div>
           <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>向上彙報品質績效、或監控製程是否失控時使用 — 看 DPPM、FPY 直通率、重工率，並用 SPC 管制圖判斷故障率是否超出管制界線。</span></div>
+          <div id="qualityProxyNote"></div>
           <div class="kpi-grid" id="qualityKpi"></div>
           <div class="card sec">
-            <div class="card-h"><div class="card-t">SPC 故障率管制圖（p-chart）</div></div>
+            <div class="card-h"><div class="card-t">SPC 故障率管制圖（p-chart · 界限依每月樣本量變動）</div></div>
             <div class="chart-wrap tall"><canvas id="spcChart"></canvas></div>
             <div id="spcNote" class="spc-note"></div>
           </div>
@@ -563,14 +608,17 @@
           <div class="page-h">
             <div>
               <div class="page-t">風險與根因分析</div>
-              <div class="page-d">FMEA / RPN 風險評分 · 故障根因樹 · 下月預測</div>
+              <div class="page-d">FMEA 風險初篩（S/O/D 由系統推估）· 故障根因樹 · 下月預測</div>
             </div>
             <div class="page-meta" id="riskMeta"></div>
           </div>
-          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>做正式 FMEA 風險評估、排定改善優先序、或預估下月趨勢時使用 — 依 RPN 風險評分排序，並透過根因樹追溯部位 → 故障模式。</span></div>
+          <div class="page-usage"><span class="pu-ico">💡</span><span><b>使用時機：</b>排定改善優先序、或預估下月趨勢時使用 — 依 RPN 風險初篩排序，並透過根因樹追溯部位 → 故障模式。正式 FMEA 評審需另補失效影響、現有控制措施與評分依據。</span></div>
           <div class="card sec" id="forecastCard"></div>
           <div class="sec">
-            <div class="sec-h"><span class="sec-t"><span class="strong">FMEA 風險矩陣</span> 依 RPN 排序</span></div>
+            <div class="sec-h"><span class="sec-t"><span class="strong">FMEA 風險初篩</span> 依 RPN 排序</span></div>
+            <div class="data-notice warn" style="margin:0 0 12px"><span class="dn-ico">⚠</span><div>
+              <strong>這是風險初篩，不是正式 FMEA 評審結果</strong>——S（嚴重度）由該部位報廢率推估、O（發生度）由相對發生頻率推估、D（偵測度）由跨月重複出現推估，三者都是從維修紀錄反推的起始值，不是評分準則下的評審結論。
+              正式 FMEA 需補：功能與失效模式定義、失效影響、現有預防／偵測控制、S/O/D 評分準則與評審人。表中 S/O/D 可直接改寫，改過的列會標記「人工調整」。</div></div>
             <div id="fmeaTable"></div>
           </div>
           <div class="sec">
@@ -739,13 +787,13 @@
 <!-- RMA Modal container -->
 <div id="rmaModal" style="display:none;position:fixed;inset:0;z-index:600;align-items:center;justify-content:center"></div>
 
-<script src="parser.js?v=20260908-1"></script>
-<script src="analyzer.js?v=20260908-1"></script>
-<script src="privacy.js?v=20260908-1"></script>
-<script src="monthly-source.js?v=20260908-1"></script>
-<script src="app.js?v=20260908-1"></script>
-<script src="report.js?v=20260908-1"></script>
-<script src="rma.js?v=20260908-1"></script>
+<script src="parser.js?v=20260918-3"></script>
+<script src="analyzer.js?v=20260918-3"></script>
+<script src="privacy.js?v=20260918-3"></script>
+<script src="monthly-source.js?v=20260918-3"></script>
+<script src="app.js?v=20260918-3"></script>
+<script src="report.js?v=20260918-3"></script>
+<script src="rma.js?v=20260918-3"></script>
 <script>
 // ─── Theme toggle（深色 ↔ 莫蘭迪淺色）───
 const THEME_KEY = 'titan_theme';
@@ -942,7 +990,10 @@ async function onAuthSuccess() {
 </div>
 <script>
 // Service Worker registration (PWA offline support)
-if ('serviceWorker' in navigator) {
+// file:// 下 navigator.serviceWorker 不存在（或註冊必定失敗），註冊只會在
+// console 留一則沒人看得懂的錯誤。直接跳過——離線可用是靠 vendor/ 自帶函式庫
+// 與 data-embed.js，本來就不需要 SW。
+if (location.protocol !== 'file:' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {

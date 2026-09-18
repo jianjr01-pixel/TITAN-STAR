@@ -63,6 +63,7 @@ TITAN-STAR 是電子工廠維修資料分析網站。現在最重要的主流程
   - `20260817-3` 加 noindex（Claude）：`index.html` / `TITAN-STAR.html` /
     `TITAN-STAR-morandi.html` 三個頁面加上 `<meta name="robots" content="noindex,nofollow">`，
     並新增 `internal tool pages carry noindex` 斷言防止被改掉（防假綠已驗）。
+    （`TITAN-STAR-morandi.html` 已於 2026-09-17 移除，該斷言現在掃兩個頁面。）
     **詳細背景與未解決的部分見下方「公開曝光現況」章節——這一步只是止血，不是保護。**
   - `20260817-2` 斷言取樣範圍規則（Claude）：`tests/data-integrity.test.mjs` 檔頭新增
     「取樣範圍必須印出來」規則，各測試改用 `t.diagnostic()` 回報實際驗了幾筆。
@@ -449,7 +450,8 @@ node build.js
 
    修正內容：
    - `parser.js` 明確判斷欄名並寫入 `record.serialKind`，同時保留 `prodSerial`。**不要只靠 `findCol` 的 includes 判斷序號語意**。
-   - 重複維修（單月 `repeatedSerials`、跨月 `crossMonthSerials`、KPI `repeatedSerials`）一律只採計 `serialKind==='machine'`。
+   - 重複維修（單月 `repeatedSerials`、跨月 `crossMonthSerials`、KPI `repeatedSerials`、品質頁 `qualityMetrics` 的重工率）一律只採計 `serialKind==='machine'`，並再排除 `batchSerialModels()` 判定的批號機種。
+     （`qualityMetrics` 這一處在本輪才補上，是 2026-07-17 修正時漏掉的呼叫點，詳見「2026-09-17 修正」。**新增任何以序號聚合的統計時，先確認有沒有套這兩道過濾**。）
    - 舊資料已依 7 月來源檔的分頁欄名回填 `serialKind`（同一份月報模板每月一致）；7 月沒有的分頁用統計推定（重複倍數 <3 者判為 machine，實測 14 個分頁全為 1.0x）。
    - 原本的「序號欄疑似填成批號」異常改為 **info 層級說明性警示**「這些機種用製令批次號」，並指向製造批次頁。
 
@@ -620,6 +622,13 @@ python3 -m http.server 8099 &      # 用 http 而非 file://，SW 與 fetch 才�
 
 ## 下一步建議
 
+0-A. **多人協作整合（M365）已完成需求訪談與架構規劃，但業主決定暫緩** ——
+   見 [`M365-協作整合規劃.md`](M365-協作整合規劃.md)。使用者 2026-09-17 確認想要
+   多人共同追進度與排錯、平台走公司既有 M365、改真帳號且資料不再公開、規模 15 人以上，
+   但同日決定**先以現行線上版完成其餘修正**，整合列為後續改版。
+   該文件含可直接轉給 IT 的申請清單，啟動時不需重新訪談。
+   **在它啟動前，CAPA/RMA 仍是單機 localStorage，不要在介面上暗示是共用平台。**
+
 0. **先讀「公開曝光現況」章節**。那一節裡的三項（data.json 公開、密碼雜湊
    隨之公開、git 歷史未清）是業主 2026-08-17 評估後決定維持現狀的**明示取捨**，
    不是待辦。不要重複提報，也不要自行「修正」——把 `users` 拿掉會讓跨裝置
@@ -673,3 +682,562 @@ python3 -m http.server 8099 &      # 用 http 而非 file://，SW 與 fetch 才�
 4. `TITAN-STAR.html` 離線單檔存在 repo 內供離線使用，build.js 產出後若內容變更需一併 commit；CI 會直接阻擋不同步的提交。
 5. parser/analyzer 的解析輔助函式（normalizePart 等）在 IIFE 內部 scope 不掛 window，測試用 vm 只能測公開介面——日後若想測內部函式，需在 parser.js 加測試用掛鉤（僅限開發環境）。
 6. data.json 2.6MB 每月成長，tests 裡 partsMaster/modelSupplements 數量下限（8,000 / 12）會隨新匯入自動通過；但若某天**筆數異常下降**（匯入腳本清掉舊月份）測試也會擋，屆時確認是預期行為再調下限。
+
+## 2026-09-17 修正（版本 20260917-1）：指標正確性四項
+
+起因：外部 AI（Codex）對 `86b1e55` 做了一輪程式碼審視，產出《TITAN-STAR 審視與升級規劃 v0.1》。
+本輪先做「不必等訪談、不涉及業務決策、與既有慣例對齊」的四項，其餘（CAPA 分階段流程、
+8D、資訊架構改版、多人協作儲存）依規劃屬於需求核定後才動工，本輪**未**進行。
+
+審視文件提的每一條都對照原始碼查證過，四處全部屬實，不是誤判。
+
+### 修正 1：資料品質熱圖的「零件」欄永遠 0%（純程式錯誤）
+
+- **位置**：`app.js` → `renderDQHeatmap()`
+- **原因**：讀 `r.parts && r.parts.length`，但維修紀錄的零件欄位是 `part1/part2/part3`
+  （見 `parser.js` 的 `COL_ALIASES` 與 `compactRecord`），根本沒有 `parts` 這個欄位。
+  `undefined && ...` 恆為假，所以該欄每個月都顯示 0%，使用者會誤判成「工廠完全沒填零件」。
+  實際上資料一直都在：3–7 月分別是 93 / 96 / 99 / 97 / 97%。
+- **修改方式**：改讀 `r.part1 || r.part2 || r.part3`。同時把該欄語意改清楚——
+  欄名 `零件記錄` → `零件換件`，色階改中性灰（`neutral: true`），不套 95/80/50% 的缺漏門檻，
+  並在表格下方加註。**未換件的維修（軟體重設、僅檢測、判報廢）本來就沒有零件，
+  空白不等於漏填**，用缺漏門檻上色會製造假的資料品質問題。
+- **驗證**：對 data.json 五個月分別跑舊式與新式計算比對（0% → 93–99%）；Playwright 實際登入看畫面。
+
+### 修正 2：重工率沒排除製令批號（與 2026-07-17 修正漏接的呼叫點）
+
+- **位置**：`analyzer.js` → `qualityMetrics()`
+- **原因**：2026-07-17 那輪已經把「同批多台被誤判成同一台重修」修掉，但只改了
+  `computeKPIs` / `repeatedSerials` / `crossMonthSerials` 三處，**品質頁的重工率是第四個
+  呼叫點，當時沒跟著改**，仍然用 `if (!r.serial) continue` 直接依 `model|serial` 聚合。
+  結果同一份資料，首頁 KPI 顯示 50 台重複維修（已修正），品質頁重工率卻還是依 164 台在算。
+- **修改方式**：套上與其他三處相同的兩道過濾 `isMachineSerial(r)` + `batchSerialModels(records)`，
+  並回傳 `reworkExcludedModels` 供 UI 說明「為什麼分母變小」。
+- **效果**（全期間，data.json 3–7 月）：重工台數 164 → **50**，有效台數 1,870 → 1,404，
+  重工率 **8.77% → 3.56%**。舊數字被批號灌水約 2.5 倍。
+  排除的 25 個機種包含 `IOT0600` / `ZSPMG31` / `ZSPMG51`（來源分頁明示為生產序號）
+  與 22 個以年月為代號、序號重複倍數 ≥3 的機種（統計推定）。
+- **驗證**：用 vm 載入 analyzer.js 跑真實 data.json，新舊算法並列輸出比對。
+
+### 修正 3：SPC 不是 p-chart，改為 Laney p′（逐點界限）
+
+- **位置**：`analyzer.js` → `spcAnalysis()`；`app.js` → `renderQuality()` 的圖表與說明列
+- **原因**：原本算的是「各月比率的算術平均 ±3 倍母體標準差」，一條固定界限套用到所有月份。
+  p-chart 的界限必須跟著每期樣本量 n_i 走（樣本大→界限窄），固定界限等於假設每月樣本量相同，
+  那是 individuals chart，不是 p-chart，但畫面與卡片標題都寫 p-chart。
+- **為什麼不是直接套教科書公式**：本站 n≈20,000，二項式 3σ 界限只有 ±0.5%，
+  五個月裡三個月「失控」。實測月間變異是抽樣誤差的 **17.3 倍**（過度離散），
+  原因是每月機種組合不同、分母用整新數代理、進廠與生產有時間落差——
+  母體根本不同質。照抄教科書公式只會製造整排假警報。
+- **修改方式**：改用 Laney p′ chart（Laney 2002），也是 Minitab 對大樣本子組的建議做法：
+  1. 中心線改用合併比率 `p̄ = Σ故障數 / Σ樣本數`（不是各月比率的算術平均）。
+  2. 逐點二項式標準差 `σ_i = √(p̄(1−p̄)/n_i)`。
+  3. 以 z 分數的移動全距求過度離散倍數 `σ_z = MR̄ / 1.128`，下限鎖 1
+     （σ_z<1 是比抽樣誤差還穩，通常是資料有問題，此時退回教科書 p-chart，
+     不讓界限比二項式更窄）。
+  4. 界限 `p̄ ± 3·σ_i·σ_z`，逐月不同，圖上用 `stepped: 'middle'` 畫成階梯線。
+  5. `σ_z ≥ 2` 時信度強制降為「趨勢觀察」，並在圖下顯示警語：界限已被放寬，
+     **「沒有超界」不等於製程穩定**，要做正式管制得先確定同一受檢母體的每期樣本量與不良定義。
+  σ_z 本身就是診斷值：σ_z 大代表該先查分母，不是先查製程。
+- **驗證**：三種算法（原固定界限 / 教科書 p-chart / Laney p′）在真實資料上並列試算，
+  確認 Laney 在 σ_z=1 時退化為教科書公式；Playwright 取出 Chart 設定，確認
+  UCL/LCL 是五個不同值的陣列而非常數。
+
+### 修正 4：代理指標揭露（DPPM / FPY / FMEA）
+
+- **位置**：`index.html`（品質頁 `#qualityProxyNote` 容器、風險頁 FMEA 說明與標題）、
+  `app.js` → `renderQuality()` 與 `HELP` 的 `quality` / `risk` 條目
+- **原因**：DPPM 與 FPY 的分子是 RMA 維修件數、分母是同期整新數，**兩個不同作業的數量**，
+  不是同一批受測品的首測結果；程式註解早就寫了「代理值」，但畫面沒說，
+  KPI 卡片還附「消費電子 <500 為佳」這種對標基準，很容易被當成正式良率往外報。
+  FMEA 的 S/O/D 由報廢率、相對頻率、跨月重複推估，頁面卻寫「做正式 FMEA 風險評估」。
+- **修改方式**（只改標示與說明，不改任何計算）：
+  - 品質頁 KPI 標題加「（代理）」，卡片下方改寫成實際口徑，並在 KPI 上方加常駐警示：
+    分子分母各是什麼、為什麼不能當良率、要產出正式 DPPM/FPY 還缺哪些欄位
+    （首測總台數、首測通過台數、重測標記）。同一則警示說明重工率排除了哪些批號機種。
+  - `HELP.quality` 的 benchmark 改掉業界對標說法（分母是代理值，不能直接對標），
+    SPC 公式改為 Laney p′ 的算式。
+  - 風險頁標題 `FMEA 風險矩陣` → `FMEA 風險初篩`，加警示說明 S/O/D 各自怎麼推估出來的、
+    正式 FMEA 還需要什麼（失效影響、現有控制、評分準則、評審人）。
+- **注意**：`.kpi-d` 是 `white-space: nowrap` 且 `.kpi` 是 `overflow: hidden`
+  （styles.css「Number / percent — never break」那條規則），
+  **KPI 卡片的副標塞不下長句會直接被截掉，`<br>` 在那個 flex 容器裡也不換行**。
+  長說明要放在卡片外的 `.data-notice` 區塊，不要塞進 `.kpi-d`。這是本輪實測踩到的。
+
+### 本輪驗證方式（可重跑）
+
+```bash
+node --check app.js && node --check analyzer.js
+pnpm install --frozen-lockfile --ignore-scripts   # tests 需要 xlsx，否則 4 項會因缺套件而紅
+node --test tests/*.test.mjs                      # 21 pass / 0 fail / 2 skip（2 skip 是既有的）
+node scripts/check-version-anchors.mjs
+node build.js                                     # TITAN-STAR.html 必須一併 commit
+```
+
+UI 實測（本容器擋外部 CDN，Playwright 需注入 Chart/XLSX 樁再跑；
+`waitUntil` 要用 `'commit'`，用 `'load'` 會因外部資源被擋而永遠等不到）：
+登入 → 品質頁 → 風險頁 → 390×844 手機寬度，確認無 pageerror、無水平溢出、文字未被截斷。
+
+### 後續接手注意事項
+
+1. **新增任何以序號聚合的統計，一律先套 `isMachineSerial()` + `batchSerialModels()`**。
+   這個坑已經踩第二次了（2026-07-17 一次、本輪 `qualityMetrics` 一次）。
+2. **DPPM / FPY 的「代理」標示不要拿掉**，除非來源 Excel 真的補上首測台數與重測標記。
+   若哪天補上了，是新增欄位與新指標，不是把現有代理值改名。
+3. **σ_z 是診斷值不是裝飾**：若某次 σ_z 掉到 2 以下，代表母體終於同質了，
+   那時才有資格談「製程受控」；在那之前 SPC 頁只能當趨勢看。
+4. 本輪**沒有**碰 CAPA 的資料模型（仍是單一 `status` 字串、可直接切結案）、
+   沒有做 8D、沒有動資訊架構。這三項依規劃書都要等使用者訪談定案
+   （個人使用 vs 多人協作會決定證據附件存哪裡），先做會重做。
+
+## 2026-09-17 第二批（版本 20260917-2）：摘要過載、零件用量語意、文件校正
+
+第一批處理指標正確性；這一批處理「畫面講的跟實際算的不一樣」。
+多人協作整合經訪談後定調但**業主決定暫緩**（見 `M365-協作整合規劃.md`），
+所以 CAPA 資料模型、8D、資訊架構改版仍未動，本批全部在現行線上版範圍內。
+
+### 修正 5：主管摘要是異常偵測的副本，不是摘要
+
+- **位置**：`app.js` → `gatherFindings()` 的 (1) 區塊
+- **實測**（改前，全期間 115/07 綜合視角）：摘要頁 **48 張卡片**
+  （立即處理 8、本期關注 28、持續監控 12），其中 **36 張來自異常偵測**。
+  外部審視說的是「重複議題」，但實際量測後**跨來源重複只有 1 件**（THS0010 同時出現在
+  製造批次與高故障機種）——真正的問題不是重複，是**整份異常清單被原封不動倒進摘要頁**，
+  等於沒有做摘要。主管打開首頁看到 48 件事，沒辦法判斷先做哪一件。
+- **修改方式**：
+  - `critical` **一律全列**，不因版面而隱藏嚴重項目。
+  - 非 critical 的異常只列前 `ANOM_SUMMARY_LIMIT`（目前 6）項
+    （`detectAnomalies` 已依嚴重度與 metric 排序，前面就是最嚴重的）。
+  - 其餘收合成一張卡：「另有 N 項異常未列出」，寫明警示/提示各幾項，並指向異常偵測頁。
+    **數量一定要寫出來**，否則使用者會以為只有這些。
+  - 沒有加去重邏輯——實測跨來源精確重複為 0 件，為不存在的情況寫程式只是增加維護成本。
+- **效果**：48 → **27 張**（立即處理 8 不變、本期關注 28→16、持續監控 12→3＋1 張收合卡）。
+- **要調鬆緊度改 `ANOM_SUMMARY_LIMIT` 一個常數即可**，不要把邏輯散寫回各來源。
+
+### 修正 6：零件 Pareto 的「件數」其實是「用量」
+
+- **位置**：`analyzer.js` → `partParetoRaw()`；`app.js` → `renderParts()` 與 `HELP.parts`；`index.html` 零件頁
+- **原因**：`count` 累加的是 `qty`（更換**數量**），欄位卻標「件數」，很容易被讀成維修件數。
+  兩者在多數零件上剛好一樣，所以平常看不出問題——因為來源 Excel 幾乎不填數量，
+  `parser.js` 在有零件時預設 `qty=1`。但**有填的那 9% 落差很大**：
+  白光 LED `45-21UNC/2630C4/TR8` 用量 188 個其實只發生在 **47 筆**維修（每筆 4 顆）、
+  `BTS-1102A` 用量 261 個只在 104 筆。依用量排序會把「單次換很多顆」的零件排到前面，
+  但它影響的機台數其實少很多——排改善優先序會排錯。
+- **修改方式**：
+  - `partParetoRaw` 新增 `repairs`（實際維修筆數，同一筆維修的三個零件欄填到同一個
+    正規化零件只算一次）。
+  - 表頭「件數」→「用量（個）」，圖表 label、卡片標題、page-d、HELP 同步改；
+    HELP 新增「維修筆數」指標並寫明**備料看用量、排改善優先序看筆數**。
+  - 表格**只在 `repairs !== count` 時**才顯示「N 筆 · 每筆 X 顆」小字。
+    91% 的列兩者相同，每列都印只會變成雜訊；有落差的那 9% 才是需要被看見的訊號。
+- **驗證**：對 data.json 全期間 195 種零件統計落差分布；Playwright 實際看畫面。
+
+### 修正 7：DESIGN.md 三處與現況不符
+
+| 段落 | 原本寫 | 實際 |
+|---|---|---|
+| 3.1 部署 | 「從 `main` 分支根目錄直接發佈（無 CI workflow）」 | 有兩個 workflow；Pages 由 Actions 發佈 `_site/`（`prepare-pages-artifact.sh` 產出），**不是分支根目錄** |
+| 3.1 資料 | 「`data.json`（雲端同步的快照）」 | 唯讀快照，前端不回寫；localStorage 純本機不共用 |
+| 8 無障礙 | 「顯示大小切換：標準/大/特大，`html[data-fontscale]`」 | 現行站台**沒有這個功能**（`data-fontscale` 只殘留在舊版單檔，該檔已於本日移除） |
+
+部署那一條特別值得修：照原文理解會以為推上 main 根目錄就會發佈整個目錄，
+而 `prepare-pages-artifact.sh` 的白名單正是為了**不要**讓 `AI-HANDOFF.md`、
+`scripts/`、`tests/`、Excel 範本被公開出去。文件講錯會誘導接手者繞過這層保護。
+
+### 修正 8：移除舊版 app 單檔複本（業主同日確認）
+
+`TITAN-STAR-morandi.html`（536 KB，最後更新 2026-08-17）是**整份舊版 app 的單檔複本**，
+被 `prepare-pages-artifact.sh` 的 `/*.html` 白名單一起發佈到公開站，
+使用者誤開會看到與正式站不一致的數字與已移除的功能（字級切換）。
+業主確認用不到，已 `git rm`。
+
+- 連帶修正 `tests/data-integrity.test.mjs` 的 noindex 斷言：掃描清單 3 → 2 個頁面。
+  診斷訊息由 `checked`/`pages` 自動推導，不需另改。
+- **不要誤刪 `styles-morandi.css`**：那是現行站台的莫蘭迪主題檔（`index.html` 載入、
+  `build.js` 內嵌成 `window.__morandiCSS__` 供切換），與這個舊版單檔無關，名字像而已。
+- `sw.js` 的 `APP_SHELL` 沒有快取這個檔，所以不需要為此升版。
+- 公開站上的舊網址 `/TITAN-STAR-morandi.html` 會變成 404，這是預期行為。
+
+## 2026-09-17 第三批（版本 20260917-3）：篩選抽屜改版、期間面板精簡
+
+使用者上線後實測回報：「不管切到哪一頁，期間面板都佔據主要版面，影響閱讀內容」，
+並指定篩選要改成下拉、目前範圍總結放右邊。這一批照使用者指定的版型做。
+
+### 修正 9：期間面板在非首頁收成一行
+
+- **位置**：`app.js` → `renderMonthlyContext()`；`styles.css` → `.monthly-context[data-compact]`
+- **原因**：`#monthlyContext` 在 `.content-inner` 裡、所有 `.page` 之上，所以**每一頁都會顯示**
+  完整面板（標題＋說明＋切換範圍＋來源狀態＋跨月警告＋三步導覽），實測佔掉近 400px 首屏，
+  把該頁真正的內容擠到摺線以下。而且期間與範圍在上方篩選列本來就看得到，是重複資訊。
+- **修改方式**：`el.dataset.compact = String(state.currentPage !== 'summary')`，
+  非首頁只留「分析期間 X ▸ 切換月份與歷史範圍」一行（123px → 實際約 60px，
+  容器有網路時不顯示錯誤列）。
+  **例外：`.source-status[data-state="error"]` 在精簡模式仍然顯示**——
+  更新失敗必須每頁都看得到，不能因為版面而被藏起來。
+
+### 修正 10：篩選列由 chip 牆改為下拉 + 範圍總結
+
+- **位置**：`index.html` `#subbarBody`；`app.js` → `renderFilters()` / 新增 `renderSubbarScope()`；
+  `styles.css` → `.subbar-controls` / `.sb-filters` / `.sb-scope`
+- **原因**：原本桌機把每個月份與每個大類都攤成 chip（兩排大按鈕，含 RMA 與整新台數），
+  展開時吃掉整個首屏；手機另有一套 `<select>`，等於同功能兩套實作。
+  但這些是「偶爾才改一次」的設定，不需要常駐佔版面。
+- **修改方式**（使用者指定的版型）：
+  - 左側三個下拉：月份 / 大類 / 機種（機種只在選了具體大類後出現）。
+    選項文字保留 RMA 與整新台數，所以選之前就看得到量級。
+  - 右側 `#subbarScope`「目前分析範圍」：期間、範圍、RMA 台數、正常整新台數，
+    並附一行「兩者是不同作業的數量，不能相除當作良率」。
+  - 刪掉 `#monthChips` / `#catChips` / `#modelChips` 與 `.subbar-mobile-row`、
+    `.subbar-chips-row`（桌機/手機兩套合而為一），連同已成孤兒的 `.sb-label` 三條 CSS。
+- **兩個實作上踩到的點**（改這裡要注意）：
+  1. `renderFilters` 裡的 `records` 是**不分大類**的全集（用來算各大類筆數）。
+     一開始直接拿它渲染右側總結，導致切了大類之後 RMA 台數紋風不動。
+     `renderSubbarScope` 必須自己用 `currentFilter()` 重算。
+  2. `setCategory()` 原本無條件 `collapseSubbar()`。改版後選具體大類會帶出「機種」下拉，
+     立刻收合等於把剛出現的選項藏起來。改成只有回到「全部」才收合。
+- **驗證**：Playwright 實測展開抽屜、切大類（無線保全 RMA 879 台，與篩選列一致）、
+  機種下拉出現、切到明細頁確認面板為 compact、390×844 無水平溢出、無 pageerror。
+
+### 已診斷但未修：分頁一直轉圈
+
+使用者回報瀏覽器分頁的載入圈圈never停。**已用對照實驗確認成因**，但修法需要決策，本輪未動。
+
+`index.html` head 有 5 個外部資源會擋住 `load` 事件：
+Google Fonts CSS ＋ jsdelivr 的 chart.js / xlsx / hammerjs / chartjs-plugin-zoom /
+chartjs-plugin-annotation。實測三種情境（Playwright，攔截外部請求）：
+
+| 外部資源行為 | `load` 事件 | 分頁圈圈 |
+|---|---|---|
+| 無回應（hang） | **不觸發** | **一直轉** |
+| 立即失敗 | 觸發 | 正常停止 |
+| 正常回應 | 觸發 | 正常停止 |
+
+所以成因是其中某個外部資源在使用者網路上**連得上但不回應**（不是壞掉，是沒有超時）。
+頁面功能看起來正常，因為 `display=swap` 會先用備用字型、而真正要用的腳本有載到。
+
+修法選項（待業主決定）：
+1. **把這 5 個函式庫與字型改為自架**（放進 repo、走同源）。最徹底，順帶解決離線與
+   CI 無法測 UI 的問題；代價是 repo 增加約 1.5MB，要改 `prepare-pages-artifact.sh`
+   白名單、`sw.js` 的 `APP_SHELL` 與 `build.js`。
+2. 先請使用者用 DevTools → Network 找出實際擱置的是哪一個，再針對性處理。
+
+**注意**：本容器的對外連線政策會擋掉 jsdelivr、Google Fonts 與 `campcool.github.io`，
+所以 Playwright 測 UI 一律要注入 Chart/XLSX 樁，且 `page.goto` 的 `waitUntil` 必須用
+`'commit'`——用 `'load'` 會因為同樣的原因永遠等不到。這不是站台的問題，是沙箱的網路政策。
+
+### 修正 10b：下拉改直向堆疊，範圍總結放大成說明（版本 20260917-4）
+
+使用者看過 20260917-3 後的第二輪指定：「大類放到月份下面，這樣空間足夠，
+右側的範圍就可以不再是小卡片，可以放大成說明」。
+
+- **位置**：`styles.css` → `.subbar-controls` / `.sb-filters` / `.sb-field` / `.sb-scope*`；
+  `app.js` → `renderSubbarScope()` 與三個下拉的選項文字
+- **修改方式**：
+  - `.subbar-controls` 由 flex 改為 `grid-template-columns: minmax(300px, 420px) 1fr`，
+    左欄三個下拉**直向堆疊**（`.sb-field` 用 `grid-template-columns: 40px 1fr` 讓標籤對齊），
+    省下來的寬度全部給右欄。
+  - 右欄不再是數字小卡：每個數字都加上一行說明
+    （RMA 返維修課＝送回維修課處理的數量、正常整新流程＝同期整新作業的數量），
+    底下補一段「全站每一頁的數字都以這個範圍計算；兩個數量來自不同作業，
+    不能相除當作良率或不良率」。字級由 `--fs-12-5` 提高到 `--fs-14`。
+  - **下拉選項文字改用縮寫**（`RMA 1,179 · 整新 19,545`）。
+    原本寫全名會讓收合狀態的 `<select>` 被截斷，反而看不到月份——
+    native select 的收合顯示就是選項文字，沒辦法只縮短收合時的版本。
+    完整名稱與意義由右側說明負責。
+  - 斷點：≤1100px 改單欄（右欄移到下方），≤820px 標籤改放在下拉上方。
+- **驗證**：Playwright 桌機 1440px 與手機 390×844 各截圖確認；
+  另外斷言三個 `<select>` 的 `scrollWidth` 沒有超過 `clientWidth`（確認文字沒被截斷）。
+
+### 修正 10c：兩欄等高、預設全部月份、收合列補上整新數（版本 20260917-5）
+
+使用者第三輪回饋的三點，全部照做。
+
+1. **左右兩欄高度不一致造成大量留白**（`styles.css` → `.subbar-controls` / `.sb-filters`）
+   左欄只有 2–3 個下拉、右欄是完整說明，原本 `align-items: start` 讓左欄下方空出一大塊。
+   改為 `align-items: stretch`，並把左欄也做成同款式面板（同樣的 surface2／border／radius／padding）
+   加上標題「切換分析範圍」與右側「目前分析範圍」對稱。
+   實測 1440px 與 1280px 兩欄高度差為 **0px**；≤1100px 改單欄堆疊，高度自然不同是預期。
+   同時把左欄寬度由 `minmax(300px, 420px)` 放寬到 `minmax(320px, 480px)`——
+   420px 時「全部大類 · RMA 6,587 · 整新 101,624」會差幾個像素被截掉。
+
+2. **預設月份改為全部**（`app.js` 四處 `RepairMonthlySource.range(..., 1)` → `'all'`）
+   登入後、開機預設、來源更新後、以及**型號查詢**都改成全部月份。
+   型號查詢那一處尤其重要：原本會把範圍重設成最新月，導致只在舊月份出現過的型號
+   查無資料，使用者只看到「找不到型號」而不知道是被月份篩掉的。
+   **單月是「刻意縮小的範圍」，應該由使用者主動選，不是一進來就把其他月份藏起來。**
+
+3. **收合列補上整新數與月數**（`app.js` → `updateSubbarSummary()`）
+   收合列很寬，原本只顯示 `月份(全部)`、`大類(全部)`、RMA 台數，
+   會讓人以為 RMA 就是全部。改為 `月份(全部) N 個月`＋RMA＋正常整新流程。
+   順帶清掉一個既有問題：原本算出 `statsLabel` 卻沒有用（dead code），
+   而且它的 `filteredRefurb` 是把當月 `denominators` 全部加總、**沒有跟著大類篩選走**，
+   選了大類時收合列的整新數會比展開後的大。
+
+   → 新增 `currentDenomTotal()` 收斂這段邏輯，收合列與展開面板共用同一個算法，
+   並且正確處理三種情況：選了機種 → 該機種；選了大類 → 該大類機種加總；全部 → total。
+   **日後任何地方要顯示「正常整新流程」台數，一律用這個函式，不要自己加總 denominators。**
+
+### 修正 11：型號查詢改用自訂建議清單（版本 20260917-6）
+
+使用者回報型號查詢的下拉「很突兀」——深色系統面板配淺色莫蘭迪主題。
+
+- **原因**：原本用原生 `<datalist>`。它的浮出清單**由瀏覽器繪製，不在文件樣式範圍內**，
+  CSS 一律無效（背景、字體、內距、圓角都改不了），外觀跟著 OS／瀏覽器配色走。
+  **這不是程式寫錯，是元素的硬限制，再怎麼調 CSS 都沒用。**
+- **位置**：`index.html` 型號查詢區塊；`app.js` → `modelSuggest*` 系列函式；
+  `styles.css` → `.model-drop*`
+- **修改方式**：移除 `<datalist>` 與 `list=` 屬性，改用 `#modelDrop` 自製面板。
+  - 前綴符合排在包含符合之前（輸入 `MSM` 要先看到 `MSM0801`），上限 12 筆。
+  - 每筆顯示大類色點、型號（命中片段高亮）、RMA 台數；
+    本期無維修的型號標「本期無維修紀錄」或「本期無維修，有補充彙總資料」。
+  - 鍵盤：↑↓ 移動、Enter 選取、Esc 關閉；點面板外關閉；
+    `role="combobox"`／`role="listbox"`／`aria-expanded`／`aria-selected` 齊備。
+  - 項目最小高度 44px（觸控目標）。
+- **順帶修掉**：原本 `renderFilters()` 連續兩次設定 `modelList.innerHTML`，
+  第一次立刻被第二次覆蓋（dead code），等於每次都白組一份約 400 筆的 HTML 字串。
+
+- **⚠️ 與「手機永不用自訂下拉」規則的關係**：`styles.css` 有一條針對**角色選擇器**的規則，
+  手機一律關掉自訂面板改用 native `<select>`。**這裡刻意不套用那條規則**，理由是兩者形狀不同：
+  角色選擇器是靠右對齊的三欄格狀面板，在窄螢幕確實不堪用；
+  而輸入框正下方的全寬建議清單本來就是手機上的標準樣式（任何搜尋框都是這樣）。
+  若之後改成靠邊、多欄或需要 hover 的形式，就要回頭套用那條規則。
+- **驗證**：Playwright 實測聚焦即開啟、輸入過濾與片段高亮、↑↓＋Enter 選取、
+  Esc 與點外面關閉、查無資料訊息、390px 手機無水平溢出，皆無 pageerror。
+
+## 2026-09-17 結案：對照 Codex 規劃書的完成度盤點
+
+本輪工作結束於版本 `20260917-6`。上面的「修正 1–11」是**做了什麼**的逐項紀錄；
+這一節是**還剩什麼**的狀態板，接手時先看這裡。
+
+對照文件：《TITAN-STAR 審視與升級規劃 v0.1》（外部 AI Codex 於 commit `86b1e55` 產出）。
+該文件由使用者提供，不在 repo 內。
+
+### 主表八項（P1×4、P2×4）
+
+| 優先 | 項目 | 狀態 | 備註 |
+|---|---|---|---|
+| P1 | 零件覆蓋率讀錯欄位 | ✅ | 含「未更換 vs 未填寫」分開 |
+| P1 | p-chart 未依樣本量 | ✅ | Laney p′；σ_z≥2 自動降為趨勢觀察 |
+| P1 | 重工率未排除批號 | ✅ | 8.77% → 3.56% |
+| P1 | DPPM／FPY 代理分母 | ⚠️ 部分 | 已改標示並揭露口徑；文件要求的「確認同一母體與去重規則」**需要來源補欄位，程式端無解** |
+| P2 | FMEA S/O/D 推估 | ✅ | 已標為風險初篩；正式 FMEA 屬「需補資料」那組 |
+| P2 | 首頁資訊過載 | ✅ | 48→27 張、期間面板非首頁收合、篩選改下拉。**「收合側欄只剩符號」未處理** |
+| P2 | DESIGN 文件分歧 | ✅ | 三處 |
+| P2 | **CAPA 分階段／結案條件** | ❌ | 見下方「卡在決策」 |
+
+文件末段「線上『同一機台重複維修』警示須以來源工作表核對特定型號欄位意義」→ ❌ 未做。
+那需要實際開 `date/` 的 Excel 逐張比對欄位語意，不是讀程式能確認的。
+
+### 頁面升級對照（16 頁）
+
+- ✅ 主管摘要、品質/SPC、風險根因
+- ⚠️ 零件 Pareto（用量／維修筆數已分開；**「涉及台數」刻意未做**——15% 記錄無序號、
+  加上批號機種會被整批排除，硬算會系統性低估，不如不給）
+- ⚠️ 報廢/重修（單機重修驗證由重工率修正涵蓋；報廢原因、再次返修觀察窗未做）
+- ⚠️ 明細資料（有搜尋與匯出；**「來源定位」做不到**——`data.json` 沒有 `sourceRow`，
+  詳見下方「兩條解析管線」）
+- ❌ 其餘 10 頁完全未動：總覽、異常偵測、跨機種矩陣、月份趨勢、故障原因、
+  製造批次、CAPA、成本量化、料件資料庫、RMA 模組
+
+### 整節未做
+
+- **8D（D0–D8）**：與 CAPA 共用改善案資料模型，綁在一起
+- **全站說明與首次導覽**：七點全未做
+- **需補欄位的 10 個指標**（FPY、DPPM、TAT、實際工時、MTBF、正式 FMEA、COPQ、Cp/Cpk…）：
+  **全部不是程式問題**，要工廠端在 Excel 補首測台數、收退件時間、工時等欄位
+- **驗收清單七項**：2 項達成（同批不計同機重修、Excel 相容與匯入失敗保留，CI 有守），
+  其餘部分或未驗（說明目錄、未受訓使用者實測、列印與鍵盤可達性）
+
+### 沒做的東西卡在哪（三類，不是漏掉）
+
+1. **卡在決策**：CAPA／8D 的資料模型取決於單機 localStorage 還是多人共用。
+   使用者已定調走 M365（見 `M365-協作整合規劃.md`）但**決定暫緩**，先做會重做。
+2. **卡在來源資料**：上述 10 個指標與「涉及台數」都是來源欄位不足，程式端無解。
+3. **純粹還沒排到**：那 10 頁的升級、全站說明與導覽、六大分類資訊架構。
+
+### 待使用者決定（懸而未決，非技術阻塞）
+
+- **瀏覽器分頁一直轉圈**：成因已用對照實驗確認（head 的 5 個外部資源之一在使用者網路
+  連得上但不回應，`load` 因此不觸發）。四個選項與實測數字見「修正 10c」前的紀錄段落，
+  重點：**自架 JS 函式庫只要 1.1MB，但自架中文字型要 16.5MB**
+  （Noto Sans TC 一個字重 3.3MB × 5 個字重），而 CSS 三個字型變數本來就都有系統備援。
+- **PWA 主畫面圖示**（與使用者一度提過的個人頭像無關，該想法已取消，未留任何檔案）：
+  1. `index.html` **沒有 `<link rel="apple-touch-icon">`** → iOS 加到主畫面會拿網頁截圖當圖示
+  2. `prepare-pages-artifact.sh` 的 `public_rules` **沒有放行 `*.png`** → 加了圖檔會線上靜默 404
+  3. `manifest.json` 的圖示是 `image/svg+xml` data URI，且 `purpose: "any maskable"`
+     但內容沒留安全區，Android 裁圓時可能切到
+  4. `start_url` 指向 `./TITAN-STAR.html`（離線單檔），而 `build.js` 會拿掉該版本的
+     service worker → **從主畫面開啟的人永遠不會自動更新**
+
+### 一個接手時會踩到的事實：兩條解析管線
+
+`parser.js`（瀏覽器端）會寫 `sourceRow`，但隨站的 `data.json` 裡**沒有**這個欄位——
+因為 `data.json` 是由 `scripts/import-month.js`（Node 呼叫 Python／openpyxl）產出的，
+兩條管線的記錄結構不一致。所以任何「定位到來源工作表第幾列」的功能，
+在現有 `data.json` 上做不到，除非先讓兩條管線輸出對齊。
+
+## 2026-09-18（版本 20260918-1 → 20260918-2）：異常偵測未套篩選、月份可複選、型號分析視窗關不掉
+
+### 修正 12：異常偵測不吃大類／機種篩選（使用者實際踩到）
+
+- **症狀**：大類選「無線保全」，異常偵測仍列出「後桶」——那個零件只出現在監視器機種
+  （`IP43A3Z` / `IPC3A36` / `IPC3A3Z` 等）。點進去下鑽顯示「本月無此零件紀錄」、
+  各月都是 0 件。
+- **原因**：`detectAnomaliesUncached()` 內部一律用 `getRecords(db, { months: [curMonth] })`，
+  **完全沒有帶 category／model**，所以異常卡永遠是全廠的；而下鑽抽屜用的是
+  `currentFilter()`（有篩選）。偵測與下鑽算在不同母體上，交集為空就變成空畫面。
+  這同時讓 20260917-3 加在範圍面板的那句「全站每一頁的數字都以這個範圍計算」變成假的。
+- **修改方式**：`detectAnomalies(db, currentMonth, filter)` 多收一個 filter（只取
+  category／model，月份由 currentMonth 決定），快取 key 併入 scope；
+  `detectAnomaliesUncached` 內部**六個取數點**全部帶上同一組 scope：
+  `curRecs` / `curDenom` / `prevRecs` / 基準月 `partPareto(getRecords(...))` /
+  `batchSerialModels(getRecords(db, scope))` / `crossMonthSerials(db, scope)`。
+  app.js 新增 `anomalyScope()` 給**六個呼叫點**共用，避免日後有人漏帶又變回全廠。
+  - `app.js:315`、`app.js:341`（匯入後的驗證性呼叫）與 `report.js` 刻意不帶 filter＝全廠，
+    因為那兩處不是畫面上的檢視。
+- **實測**（data.json 3–7 月，最新月）：全部大類 36 筆異常（含後桶）、
+  無線保全 13 筆（**後桶消失**）、監視器 10 筆（後桶仍在）。UI 層也驗過同樣結果。
+- **這一條要記住**：`getRecords`／`getDenominators` 已經正確處理 `category: '全部'`
+  （視同不篩選），所以呼叫端直接把 `state.selectedCategory` 丟進去即可，不用先轉 null。
+
+### 修正 13：月份可複選（Ctrl／⌘）
+
+- 使用者要求「按著 Ctrl 應該要可以複選月份」。
+- **作法**：`#monthSelect` 改成 native `<select multiple>`。原生就支援
+  Ctrl／⌘ 點選複選與 Shift 選範圍，**不需要自己寫鍵盤邏輯或 a11y**；
+  手機上點擊即切換，也不必按鍵。旁邊補一個「全選」按鈕與操作提示。
+  `size` 依月份數自動調整（3–8 列）。它在收合的篩選抽屜裡，平常不佔版面。
+- 新增 `setMonthsFromSelect(sel)`：**一個都沒選時退回全部**——空集合會讓全站每個數字
+  變 0，那不是使用者的本意，多半只是點掉了最後一個。此處刻意**不收合抽屜**，
+  因為複選常常要連點好幾次。
+- 連帶修 `renderSubbarScope()` 的期間標籤：可以複選之後選取不一定連續，
+  原本一律寫成 `115/03 – 115/05` 會讓人以為包含 04。改成**連續才用破折號**，
+  不連續就逐月列出（超過 4 個月則顯示前 3 個加「等 N 個月（不連續）」）。
+
+### 修正 14：型號分析視窗關不掉（桌機限定，版本 20260918-2）
+
+使用者給的重現路徑很關鍵：**異常偵測 → 嚴重 → 後桶 → 點第一個監視器（IP43A3Z）
+→ 跳出「IP43A3Z 型號分析」視窗 → 點 ✕ 沒反應**。
+
+- **根因在 CSS，不在 JS。** `openModelDrawer()` 沿用同一個 `#drawer`，只是加上
+  `model-profile` 變體（置中對話框）。抽屜原本**只靠 `transform` 藏起來**：
+  側邊態關閉是 `translateX(100%)`（滑出畫面外，沒事），但 `model-profile`
+  的關閉態是 `translate(-50%, 24px) scale(.98)` ——**位置就在畫面正中央**，
+  移除 `.open` 之後它原地留著，看起來就是「✕ 點了沒反應」。
+  `domCloseDrawer()` 一直都有正確執行，class 也確實被移掉了。
+- 手機（≤680px）的 `model-profile` 是 `translateY(100%)`，會滑出畫面下緣，
+  所以**這個 bug 只發生在桌機**——這也是為什麼使用者說「部分視窗」關不掉。
+- **修法**：`.drawer` 的關閉態改為 `opacity: 0; visibility: hidden`，
+  `.drawer.open` 才 `visibility: visible`。`visibility` 的 transition 延遲
+  `.25s`（等位移動畫跑完）再切換，滑出動畫不會被截斷。這樣**任何變體、任何斷點
+  都真的會消失**，不再依賴「位移剛好把它推出畫面」這個脆弱前提。
+
+#### 順帶更正一個我自己的假通過
+
+上一輪我回報「主抽屜實測正常關閉」，那個結論是錯的。當時的可見性判斷用了
+`offsetParent !== null`，但 **`position: fixed` 的元素 `offsetParent` 永遠是
+`null`**，所以不論開關都會被判成「不可見」，測試等於沒在測。
+
+現在的判斷方式（`tests` 目錄外的一次性驗證腳本，記錄於此供後人沿用）：
+
+```js
+const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+const inViewport = r.width > 1 && r.height > 1 && r.bottom > 0 && r.right > 0 &&
+                   r.top < innerHeight && r.left < innerWidth;
+const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+const visible = cs.display !== 'none' && cs.visibility !== 'hidden' &&
+                +cs.opacity > 0.01 && inViewport;
+const blocking = !!(hit && (hit === el || el.contains(hit)));  // 還擋不擋得住點擊
+```
+
+**要測「浮層關掉了沒」，就用 computed style ＋ getBoundingClientRect ＋
+elementFromPoint 命中測試，不要用 `offsetParent`。**
+
+#### 驗證結果
+
+同一支腳本先 `git stash` 掉修改跑一次、再套用跑一次，證明因果：
+
+| 情境 | 修正前 | 修正後 |
+| --- | --- | --- |
+| 桌機 型號分析 點 ✕ | `visible: true`、命中自己 → **關不掉** | `visibility: hidden`、不命中 → 關得掉 |
+| 桌機 型號分析 按 Esc | 同上，關不掉 | 關得掉 |
+| 桌機 側邊抽屜 點 ✕ | 正常 | 正常 |
+| 手機（390×844）全部 | 正常 | 正常 |
+| 關閉後畫面中央命中 | 頁面內容（無殘留攔截層） | 同左 |
+
+其餘彈出層一併用正確方法重測：**主抽屜、型號分析、帳號管理、料件編輯
+（`#pdbModal`，走 `display:flex/none`）全部關得掉**；收掉之後全站
+`position: fixed` 且 `z-index > 500` 的浮層**沒有任何一個還留在畫面上**。
+上傳視窗（`#uploadZone`）不是彈出層，是登入後的整頁上傳畫面，沒有 ✕。
+
+## 2026-09-18（版本 20260918-3）：離線可攜——複製到別台電腦也能開
+
+### 使用者回報
+
+> 這個檔案如果別人複製過去會無法開啟……是否能修改成整個資料夾搬移到不同電腦去都可以開啟使用
+
+### 實測到的三個原因（不是猜的）
+
+用 Playwright 把整包複製到一個全新資料夾、開全新瀏覽器 profile（＝空的
+localStorage）、把所有非本機請求全部 abort，模擬「另一台沒有網路的電腦」。
+結果與 console 訊息：
+
+1. **資料拿不到。** `fetch('./data.json')` 在 `file://` 下被瀏覽器直接拒絕：
+   `Fetch API cannot load file:///…/data.json. URL scheme "file" is not supported.`
+   原本的機器看得到資料，只是因為 localStorage 早就被線上版填過了；
+   換一台電腦就是一個空殼。**這是主因。**
+2. **圖表與 Excel 匯入不見。** Chart.js、SheetJS、hammer、兩個 Chart 外掛
+   全部從 `cdn.jsdelivr.net` 載，離線或公司網路擋 CDN 就沒有
+   （`window.Chart` / `window.XLSX` 皆 undefined）。
+3. **字體與 SW 只會拖慢與噴錯。** Google Fonts 的 `<link>` 在離線時要等連線
+   逾時；`navigator.serviceWorker.register()` 在 `file://` 必定失敗。
+
+### 修法
+
+| 問題 | 作法 |
+| --- | --- |
+| 函式庫走 CDN | 五支全部自帶在 `vendor/`（1.2 MB，來源與版本見 `vendor/README.md`） |
+| `file://` 讀不到 data.json | `build.js` 把 `data.json` 內嵌進單檔版成 `window.__TITAN_EMBEDDED_DB__`；`app.js` 新增 `loadCloudPayload()`，`file:` 時讀內嵌、`http(s)` 時照舊 fetch |
+| 雙擊 index.html 是空殼 | `index.html` 在 `file:` 時 `location.replace('TITAN-STAR.html')`，且這段排在 `<head>` 最前面（在讀那 1.2 MB 之前就轉走）。`build.js` 會把這段從單檔版移除，不會轉址轉不完 |
+| 字體 | Google Fonts 改由 JS 判斷協定後動態插入；`styles.css` 新增 `--cjk-fallback`（微軟正黑體／蘋方／Noto Sans CJK），離線不會掉成細明體 |
+| SW | `location.protocol !== 'file:'` 才註冊 |
+| 每次開啟去掃 GitHub 的 `date/` | `syncMonthlyWorkbook()` 在 `file:` 時直接回傳，狀態列改寫「離線副本，資料截止於 115/0X」，不再顯示紅色的「更新未完成」 |
+
+**沒有新增 `data-embed.js` 這種與 `data.json` 平行的第二份資料檔。**
+一開始的設計是那樣，但那等於每次更新月報都要同步兩份 2.6 MB、還要加一個
+防走鐘的 CI 檢查。改成「離線一律走單檔版」之後，資料只有 `data.json`
+一個來源，`build.js` 是唯一的複製點。
+
+### 實測結果（模擬另一台沒有網路的電腦）
+
+| 情境 | 月份 | 紀錄數 | 圖表 | 對外請求 | JS 錯誤 |
+| --- | --- | --- | --- | --- | --- |
+| 複製整個資料夾，雙擊 `index.html` | 5（115/03–115/07） | 6,587 | 11 | **0** | 無 |
+| 只複製 `TITAN-STAR.html` 一個檔 | 5（同上） | 6,587 | 11 | **0** | 無 |
+| 線上版（本機 server） | 同上 | 6,587 | 11 | 只剩字體與 date 資料夾檢查 | 無 |
+
+單檔版 911 KB → **4,877 KB**（＋1.2 MB 函式庫 ＋2.6 MB 資料）。
+
+### 副作用：分頁轉圈的問題一併解決
+
+先前使用者問「為什麼上面的分頁會一直轉」，當時查到是 CDN 連不上時瀏覽器要等
+到 timeout。函式庫改成同源自帶之後，這條路徑就不存在了。原本列的方案 A–D
+不必再選。
+
+### 已知限制（要讓使用者知道）
+
+**離線複本是快照，不會自己更新。** 線上版每次開啟都會去 `date/` 撈新的月報並
+合併，離線版做不到。目前 `data.json` 停在 **115/07**，而 `date/` 裡已經有
+115/08 的 Excel——所以現在打包出來的離線複本會比線上版少一個月。
+要讓離線複本跟上，得先 `npm run import:month` 把 08 匯進 `data.json`
+再 `node build.js`。這會同時更新公開的線上資料，屬於每月匯入流程的一部分，
+**沒有在這次改動裡順手做掉**。
+
+### 防回歸
+
+新增 `tests/offline-portable.test.mjs`（8 項）：外部 script 為零、vendor 檔案
+存在且非空、轉址排在 vendor 之前、字體與 SW 的協定判斷、`--cjk-fallback`、
+`app.js` 兩處離線分支、單檔版內嵌資料且零 `<script src>`、Pages 發布清單含
+`vendor/*.js` 但不含 `vendor/README.md`。
+
+已做反向驗證：把其中一支函式庫改回 CDN，第 1、2 項立刻紅燈。

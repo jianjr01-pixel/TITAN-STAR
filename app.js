@@ -264,17 +264,36 @@ window.App = (function () {
     return false;
   }
 
+  // 取得共用資料。兩條路徑：
+  //  - http(s)：fetch ./data.json（線上版與本機 server，行為跟以前一樣）
+  //  - file://：瀏覽器禁止 file:// 頁面 fetch 同目錄檔案（"URL scheme file is
+  //    not supported"），所以 index.html 會在 file:// 時先用 <script> 載入
+  //    data-embed.js，把同一份資料掛成 window.__TITAN_EMBEDDED_DB__。
+  //    這是「整個資料夾複製到別台電腦直接雙擊開啟」能看到資料的關鍵。
+  async function loadCloudPayload() {
+    if (location.protocol === 'file:') {
+      const embedded = window.__TITAN_EMBEDDED_DB__;
+      if (!embedded) {
+        console.warn('離線開啟但找不到 data-embed.js，將只使用這台瀏覽器既有的資料。');
+        return null;
+      }
+      try { localStorage.setItem(CLOUD_CHECK_KEY, currentMonthKey()); } catch (e) {}
+      return embedded;
+    }
+    // 'no-cache'（而非 'no-store'）：一律向伺服器驗證新鮮度，但會帶
+    // If-None-Match/If-Modified-Since。資料沒變時 GitHub Pages 回 304，
+    // 不重傳 body — 省下每次開啟的整包 data.json 流量（目前 2.6MB）。
+    const res = await fetch(CLOUD_URL, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    try { localStorage.setItem(CLOUD_CHECK_KEY, currentMonthKey()); } catch (e) {}
+    return res.json();
+  }
+
   // Load the baseline (parts, supplements, accounts), then check the source folder on every open.
   // If GitHub has newer/more records than this browser, adopt it automatically.
   async function syncCloud() {
     try {
-      // 'no-cache'（而非 'no-store'）：一律向伺服器驗證新鮮度，但會帶
-      // If-None-Match/If-Modified-Since。資料沒變時 GitHub Pages 回 304，
-      // 不重傳 body — 省下每次開啟的整包 data.json 流量（目前 2.6MB）。
-      const res = await fetch(CLOUD_URL, { cache: 'no-cache' });
-      if (!res.ok) return null;
-      try { localStorage.setItem(CLOUD_CHECK_KEY, currentMonthKey()); } catch(e) {}
-      const cloud = await res.json();
+      const cloud = await loadCloudPayload();
       if (!cloud || !cloud.months) return null;
       const cloudStats = dbStats(cloud);
       const localDb = RepairDB.load();
@@ -330,6 +349,16 @@ window.App = (function () {
   }
 
   async function syncMonthlyWorkbook() {
+    // 離線副本（file:// 直接雙擊開啟）不去掃 GitHub 的 date 資料夾：
+    // 那是「有沒有新的月報 Excel」的檢查，離線本來就做不到，硬打會得到一個
+    // 看起來像壞掉的紅色錯誤列。改成明講這是離線副本、資料停在哪個月份。
+    if (location.protocol === 'file:') {
+      const months = Object.keys((loadBestDb() || {}).months || {}).sort();
+      const latest = months.length ? fmt.monthLabel(months[months.length - 1]) : '無';
+      state.sourceStatus = { kind: 'ok', message: `離線副本，資料截止於 ${latest}。要取得新月份請開線上版。` };
+      renderSourceStatus();
+      return null;
+    }
     state.sourceStatus = { kind: 'checking', message: '正在檢查維修與整新故障 Excel…' };
     renderSourceStatus();
     try {
@@ -368,7 +397,7 @@ window.App = (function () {
     const result = await syncMonthlyWorkbook();
     if (result) {
       state.db = loadBestDb();
-      if (result.updated) state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 1);
+      if (result.updated) state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 'all');
       renderAll();
     }
   }
@@ -404,6 +433,10 @@ window.App = (function () {
     }
     const warnings = state.sourceStatus?.warnings || state.db.sourceImport?.warnings || [];
     $('sourceWarnings').textContent = warnings.join(' ');
+    // 期間與來源資訊在首頁是導覽，在其他頁面只是背景資訊。完整版每頁重複會佔掉
+    // 近 400px 首屏，把該頁真正的內容擠到摺線以下（使用者實測回報）。
+    // 非首頁收成「期間 + 切換範圍」一行；更新失敗的狀態不收，見 styles.css。
+    el.dataset.compact = String(state.currentPage !== 'summary');
   }
 
   // Maintainer action: produce a data.json to commit to the repo.
@@ -677,8 +710,10 @@ window.App = (function () {
       return;
     }
     // 有資料：登入後直接回到乾淨的主管摘要，不沿用可能卡住的舊篩選。
+    // 預設看全部月份——單月是「刻意縮小的範圍」，應該由使用者主動選，
+    // 而不是一進來就把其他月份藏起來（使用者 2026-09-17 指定）。
     state.currentPage = 'summary';
-    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 1);
+    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 'all');
     state.selectedCategory = '全部';
     state.selectedModel = '全部';
     renderAnalysisRoleBar();
@@ -719,8 +754,8 @@ window.App = (function () {
         if (miniBtn) miniBtn.textContent = '▷';
       }
     } catch(e) {}
-    // Default: latest report month, all categories
-    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 1);
+    // Default: 全部月份、全部大類
+    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 'all');
     state.selectedCategory = '全部';
     state.selectedModel = '全部';
     renderAnalysisRoleBar();
@@ -801,24 +836,16 @@ window.App = (function () {
       allDenom += d;
     }
 
-    // Month chips（維修件數 + 整新數）
-    const mc = $('monthChips');
-    mc.innerHTML = '<div class="sb-label">月份</div>'
-      + `<button class="chip ${all ? 'active' : ''}" onclick="App.setMonth('__ALL__')">全部月份 <span class="num">${months.length} 個月</span>${allDenom ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(allDenom)} 台</span>` : ''}</button>`
-      + months.map(mk => {
-        const sel = !all && state.selectedMonths.includes(mk);
-        const m = state.db.months[mk];
-        const den = monthDenom[mk];
-        return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setMonth('${mk}')">${fmt.monthLabel(mk)} <span class="num">RMA 返維修課 ${fmt.int(m.records.length)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
-      }).join('');
-
-    // Mobile month select（完整標示維修筆數；窄螢幕由 CSS 改為上下排列）
+    // 月份下拉（每個選項帶當月 RMA 與整新數，選之前就看得到量級）
     const ms = $('monthSelect');
     if (ms) {
-      ms.innerHTML = `<option value="__ALL__">全部 ${months.length} 個月</option>`
-        + (selMonth === '__RANGE__' ? `<option value="__RANGE__" disabled>已選 ${state.selectedMonths.length} 個月</option>` : '')
-        + months.map(mk => `<option value="${mk}">${fmt.monthLabel(mk)} · RMA 返維修課 ${fmt.int(state.db.months[mk].records.length)} 台</option>`).join('');
-      ms.value = selMonth;
+      // 選項文字用縮寫（RMA／整新），完整名稱與說明在右側「目前分析範圍」。
+      // 多選清單沒有「全部」這個選項——全部＝每一列都選中，另有「全選」按鈕。
+      const chosen = new Set(state.selectedMonths);
+      ms.size = Math.min(Math.max(months.length, 3), 8);
+      ms.innerHTML = months.map(mk =>
+        `<option value="${mk}"${chosen.has(mk) ? ' selected' : ''}>${fmt.monthLabel(mk)} · RMA ${fmt.int(state.db.months[mk].records.length)}${monthDenom[mk] ? ` · 整新 ${fmt.int(monthDenom[mk])}` : ''}</option>`
+      ).join('');
     }
 
     // Category chips
@@ -836,25 +863,14 @@ window.App = (function () {
     }
     const catDen = (c) => c === '全部' ? denomAll.total : (catDenom[c] || 0);
 
-    const cc = $('catChips');
-    cc.innerHTML = '<div class="sb-label">大類</div>'
-      + cats.map(c => {
-        const sel = state.selectedCategory === c;
-        const count = c === '全部' ? records.length : (catCounts[c] || 0);
-        const den = catDen(c);
-        const color = c === '全部' ? COLORS.text3 : (CAT_COLOR[c] || COLORS.text3);
-        const categoryLabel = c === '全部' ? '全部大類' : c;
-        return `<button class="chip cat-chip ${sel ? 'active' : ''}" style="--c:${color}" onclick="App.setCategory('${c}')">${categoryLabel} <span class="num">RMA 返維修課 ${fmt.int(count)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
-      }).join('');
-
-    // Mobile category select（完整標示大類名稱與維修筆數）
+    // 大類下拉
     const cs = $('catSelect');
     if (cs) {
       cs.innerHTML = cats.map(c => {
         const count = c === '全部' ? records.length : (catCounts[c] || 0);
         const den = catDen(c);
         const label = c === '全部' ? '全部大類' : c;
-        return `<option value="${c}">${label} · RMA 返維修課 ${fmt.int(count)} 台</option>`;
+        return `<option value="${c}">${label} · RMA ${fmt.int(count)}${den ? ` · 整新 ${fmt.int(den)}` : ''}</option>`;
       }).join('');
       cs.value = state.selectedCategory;
     }
@@ -864,39 +880,84 @@ window.App = (function () {
     const knownModels = RepairAnalyzer.knownModels ? RepairAnalyzer.knownModels(state.db) : Object.keys(allModelCounts);
     for (const m of knownModels) if (!(m in allModelCounts)) allModelCounts[m] = 0;
     const allModels = Object.entries(allModelCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m]) => m);
-    const modelList = $('modelLookupList');
-    if (modelList) {
-      modelList.innerHTML = allModels.map(m => `<option value="${m}">RMA 返維修課 ${fmt.int(allModelCounts[m])} 台</option>`).join('');
-    }
-    if (modelList) {
-      modelList.innerHTML = allModels.map(m => {
-        const sup = RepairAnalyzer.getModelSupplement ? RepairAnalyzer.getModelSupplement(state.db, m) : null;
-        const label = allModelCounts[m] ? `RMA 返維修課 ${fmt.int(allModelCounts[m])} 台` : (sup ? '補充彙總資料' : 'RMA 返維修課 0 台');
-        return `<option value="${m}">${label}</option>`;
-      }).join('');
-    }
+    // 型號建議清單的資料來源（渲染在 openModelSuggest / renderModelSuggest）。
+    // 已依 RMA 台數由多到少排序，所以建議清單不必再排一次。
+    modelSuggestIndex = allModels.map(m => ({
+      model: m,
+      count: allModelCounts[m] || 0,
+      category: RepairParser.getCategory(m),
+      supplement: !allModelCounts[m] && RepairAnalyzer.getModelSupplement
+        ? !!RepairAnalyzer.getModelSupplement(state.db, m) : false,
+    }));
     const modelInput = $('modelQuickSearch');
     if (modelInput && document.activeElement !== modelInput) {
       modelInput.value = state.selectedModel === '全部' ? '' : state.selectedModel;
     }
 
-    // Model chips (only when a category is selected)
-    if (state.selectedCategory !== '全部') {
+    // 機種下拉：只在選了大類之後才出現（沒選大類時機種清單太長，沒有篩選意義）
+    const modelField = $('modelField');
+    const mdSel = $('modelSelect');
+    if (state.selectedCategory !== '全部' && modelField && mdSel) {
       const inCat = records.filter(r => r.category === state.selectedCategory);
       const mCount = {};
       for (const r of inCat) mCount[r.model] = (mCount[r.model] || 0) + 1;
       const models = Object.entries(mCount).sort((a, b) => b[1] - a[1]).map(([m]) => m);
-      const md = $('modelChips');
-      md.style.display = 'flex';
-      md.innerHTML = '<div class="sb-label">機種</div>'
-        + `<button class="chip ${state.selectedModel === '全部' ? 'active' : ''}" onclick="App.setModel('全部')">全部</button>`
-        + models.map(m => {
-          const sel = state.selectedModel === m;
-          return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setModel('${m}')">${m} <span class="num">RMA 返維修課 ${fmt.int(mCount[m])} 台</span></button>`;
-        }).join('');
-    } else {
-      $('modelChips').style.display = 'none';
+      modelField.style.display = '';
+      mdSel.innerHTML = `<option value="全部">全部機種</option>`
+        + models.map(m => `<option value="${m}">${m} · RMA ${fmt.int(mCount[m])}</option>`).join('');
+      mdSel.value = models.includes(state.selectedModel) ? state.selectedModel : '全部';
+    } else if (modelField) {
+      modelField.style.display = 'none';
     }
+
+    renderSubbarScope();
+  }
+
+  // 目前篩選條件下的「正常整新流程」台數。
+  // 選了大類或機種時必須只加總對應的機種，直接把 denominators 全部加總會灌大分母。
+  function currentDenomTotal() {
+    const denomAll = RepairAnalyzer.getDenominators(state.db, { months: state.selectedMonths });
+    const byModel = denomAll.byModel || {};
+    if (state.selectedModel && state.selectedModel !== '全部') return byModel[state.selectedModel] || 0;
+    if (state.selectedCategory === '全部') return denomAll.total;
+    return Object.entries(byModel).reduce((s, [m, n]) => s + (RepairParser.getCategory(m) === state.selectedCategory ? n : 0), 0);
+  }
+
+  // 抽屜右側：目前分析範圍總結。左邊負責切換，右邊負責「我現在看的是什麼」。
+  function renderSubbarScope() {
+    const el = $('subbarScope');
+    if (!el) return;
+    // 一定要用真正的篩選條件重算。renderFilters 裡的 records 是「不分大類」的全集，
+    // 拿它來顯示會讓切了大類之後台數紋風不動。
+    const records = RepairAnalyzer.getRecords(state.db, currentFilter());
+    const months = state.selectedMonths.slice().sort();
+    // 可以複選之後，選取不一定連續。連續才用破折號寫成區間，
+    // 不連續還寫「03 – 05」會讓人以為包含 04，所以改成逐月列出。
+    const allMonths = Object.keys(state.db.months).sort();
+    const firstIdx = allMonths.indexOf(months[0]);
+    const contiguous = months.length > 0
+      && months.every((mk, i) => allMonths[firstIdx + i] === mk);
+    const periodLabel = months.length === 0 ? '—'
+      : months.length === 1 ? fmt.monthLabel(months[0])
+      : contiguous ? `${fmt.monthLabel(months[0])} – ${fmt.monthLabel(months[months.length - 1])}`
+      : months.length <= 4 ? months.map(fmt.monthLabel).join('、')
+      : `${months.slice(0, 3).map(fmt.monthLabel).join('、')} 等 ${months.length} 個月（不連續）`;
+    const cat = state.selectedCategory === '全部' ? '全部大類' : state.selectedCategory;
+    const model = state.selectedModel && state.selectedModel !== '全部' ? state.selectedModel : null;
+    const den = currentDenomTotal();
+    el.innerHTML = `
+      <div class="sb-scope-h">目前分析範圍</div>
+      <div class="sb-scope-grid">
+        <span class="sb-scope-k">期間</span>
+        <span class="sb-scope-v">${escapeHtml(periodLabel)}<span class="sub">共 ${months.length} 個月</span></span>
+        <span class="sb-scope-k">範圍</span>
+        <span class="sb-scope-v">${escapeHtml(cat)}${model ? ` · ${escapeHtml(model)}` : ''}<span class="sub">${model ? '單一機種' : state.selectedCategory === '全部' ? '未篩選機種' : '此大類全部機種'}</span></span>
+        <span class="sb-scope-k">RMA 返維修課</span>
+        <span class="sb-scope-v"><span class="n">${fmt.int(records.length)}</span> 台<span class="sub">送回維修課處理的數量</span></span>
+        ${den ? `<span class="sb-scope-k">正常整新流程</span>
+        <span class="sb-scope-v"><span class="n">${fmt.int(den)}</span> 台<span class="sub">同期整新作業的數量</span></span>` : ''}
+      </div>
+      <div class="sb-scope-note">全站每一頁的數字都以這個範圍計算。<strong>上面兩個數量來自不同作業，不能相除當作良率或不良率</strong>；要換範圍請用左邊的下拉。</div>`;
   }
 
   function collapseSubbar() {
@@ -945,12 +1006,25 @@ window.App = (function () {
     collapseSubbar();
   }
 
+  // 多選月份。一個都沒選＝退回全部：空集合會讓全站每個數字都變 0，
+  // 那不是使用者想表達的意思，多半只是點掉了最後一個。
+  function setMonthsFromSelect(sel) {
+    const picked = [...sel.selectedOptions].map(o => o.value).sort();
+    const allMonths = Object.keys(state.db.months).sort();
+    state.selectedMonths = picked.length ? picked : allMonths.slice();
+    renderAll();
+    saveFilterState();
+    // 這裡刻意不收合抽屜——複選常常要連點好幾次，收起來會很難用
+  }
+
   function setCategory(c) {
     state.selectedCategory = c;
     state.selectedModel = '全部';
     renderAll();
     saveFilterState();
-    collapseSubbar();
+    // 選了具體大類會帶出「機種」下拉，這時收起抽屜等於把剛出現的選項藏起來；
+    // 只有回到「全部」（沒有後續選項）才收合。
+    if (c === '全部') collapseSubbar();
   }
 
   function setModel(m) {
@@ -977,7 +1051,121 @@ window.App = (function () {
     return { q, norm, exact, fuzzy };
   }
 
+  // ─── 型號建議清單（取代原生 datalist）───────────────────────────
+  // 為什麼自己做：原生 <datalist> 的浮出清單由瀏覽器繪製，不在文件樣式範圍內，
+  // CSS 一律無效，在淺色主題上會冒出系統的深色面板，而且無法顯示大類色點等資訊。
+  //
+  // 注意：styles.css 有一條「手機永不用自訂下拉」的規則，那是針對角色選擇器——
+  // 它是靠右對齊的三欄格狀面板，在窄螢幕確實不堪用。這裡不同：輸入框底下的
+  // 全寬建議清單本來就是手機上的標準樣式，所以兩邊共用同一套，只調整寬度與觸控高度。
+  let modelSuggestIndex = [];
+  let modelSuggestItems = [];
+  let modelSuggestActive = -1;
+  const MODEL_SUGGEST_MAX = 12;
+
+  function modelSuggestMatches(raw) {
+    const q = String(raw || '').trim().toUpperCase().replace(/[-_\s]/g, '');
+    if (!q) return modelSuggestIndex.slice(0, MODEL_SUGGEST_MAX);
+    // 開頭符合的排前面，其次才是包含——輸入 MSM 時應該先看到 MSM0801 而不是別的
+    const starts = [], contains = [];
+    for (const it of modelSuggestIndex) {
+      const key = it.model.toUpperCase().replace(/[-_\s]/g, '');
+      if (key.startsWith(q)) starts.push(it);
+      else if (key.includes(q)) contains.push(it);
+    }
+    return starts.concat(contains).slice(0, MODEL_SUGGEST_MAX);
+  }
+
+  function renderModelSuggest(raw) {
+    const drop = $('modelDrop');
+    const input = $('modelQuickSearch');
+    if (!drop || !input) return;
+    modelSuggestItems = modelSuggestMatches(raw);
+    modelSuggestActive = -1;
+    if (!modelSuggestItems.length) {
+      drop.innerHTML = `<div class="model-drop-empty">找不到符合的型號</div>`;
+    } else {
+      const q = String(raw || '').trim().toUpperCase().replace(/[-_\s]/g, '');
+      drop.innerHTML = modelSuggestItems.map((it, i) => {
+        const color = CAT_COLOR[it.category] || COLORS.text3;
+        // 把命中的片段標起來，讓使用者看得出為什麼這筆被列出來
+        let name = escapeHtml(it.model);
+        if (q) {
+          const idx = it.model.toUpperCase().replace(/[-_\s]/g, '').indexOf(q);
+          if (idx >= 0) {
+            name = escapeHtml(it.model.slice(0, idx)) + '<b>' + escapeHtml(it.model.slice(idx, idx + q.length)) + '</b>'
+              + escapeHtml(it.model.slice(idx + q.length));
+          }
+        }
+        const meta = it.count ? `RMA 返維修課 ${fmt.int(it.count)} 台`
+          : it.supplement ? '本期無維修，有補充彙總資料' : '本期無維修紀錄';
+        return `<button type="button" class="model-drop-item" role="option" aria-selected="false" data-i="${i}"
+          onmousedown="event.preventDefault()" onclick="App.pickModelSuggest(${i})">
+          <span class="mdi-dot" style="--c:${color}"></span>
+          <span class="mdi-name">${name}</span>
+          <span class="mdi-meta">${meta}</span>
+        </button>`;
+      }).join('');
+    }
+    drop.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+
+  function openModelSuggest() { renderModelSuggest($('modelQuickSearch')?.value || ''); }
+
+  function closeModelSuggest() {
+    const drop = $('modelDrop');
+    const input = $('modelQuickSearch');
+    if (drop) { drop.hidden = true; drop.innerHTML = ''; }
+    if (input) input.setAttribute('aria-expanded', 'false');
+    modelSuggestItems = [];
+    modelSuggestActive = -1;
+  }
+
+  function setModelSuggestActive(next) {
+    const drop = $('modelDrop');
+    if (!drop || !modelSuggestItems.length) return;
+    const items = drop.querySelectorAll('.model-drop-item');
+    if (modelSuggestActive >= 0 && items[modelSuggestActive]) {
+      items[modelSuggestActive].classList.remove('active');
+      items[modelSuggestActive].setAttribute('aria-selected', 'false');
+    }
+    modelSuggestActive = (next + items.length) % items.length;
+    const el = items[modelSuggestActive];
+    if (el) {
+      el.classList.add('active');
+      el.setAttribute('aria-selected', 'true');
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function pickModelSuggest(i) {
+    const it = modelSuggestItems[i];
+    if (!it) return;
+    const input = $('modelQuickSearch');
+    if (input) input.value = it.model;
+    closeModelSuggest();
+    quickModelSearch(it.model);
+  }
+
+  function modelSuggestKey(ev) {
+    const open = !$('modelDrop')?.hidden;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); if (!open) openModelSuggest(); else setModelSuggestActive(modelSuggestActive + 1); return; }
+    if (ev.key === 'ArrowUp')   { ev.preventDefault(); if (open) setModelSuggestActive(modelSuggestActive - 1); return; }
+    if (ev.key === 'Escape')    { closeModelSuggest(); return; }
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (open && modelSuggestActive >= 0) pickModelSuggest(modelSuggestActive);
+      else { closeModelSuggest(); quickModelSearch(ev.target.value); }
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#topModelLookup')) closeModelSuggest();
+  });
+
   function quickModelSearchInput(raw) {
+    renderModelSuggest(raw);
     const { q, exact } = resolveModelQuery(raw);
     clearTimeout(quickModelSearchTimer);
     if (!q || !exact) return;
@@ -1008,7 +1196,9 @@ window.App = (function () {
     lastAutoModelSearch = fuzzy;
     state.selectedCategory = '全部';
     state.selectedModel = fuzzy;
-    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 1);
+    // 型號查詢跨全部月份：限定在最新月會讓只在舊月份出現過的型號查無資料，
+    // 使用者只會看到「找不到型號」而不知道是被月份篩掉的。
+    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 'all');
     // 必須真正切換頁面 DOM（.page.active / 導覽高亮），
     // 否則在其他分頁搜尋時結果會渲染進隱藏的摘要頁，看起來像沒反應
     if (state.currentPage !== 'summary') {
@@ -1197,11 +1387,12 @@ window.App = (function () {
 
     // Build stats for current filter
     const filteredRecords = RepairAnalyzer.getRecords(state.db, { months: state.selectedMonths, category: cat === '全部' ? null : cat, model: model === '全部' ? null : model });
-    const filteredRefurb = state.selectedMonths.reduce((s, mk) => s + Object.values((state.db.months[mk] || {}).denominators || {}).reduce((a, b) => a + b, 0), 0);
+    // 分母同樣要跟著大類／機種篩選走，否則收合列的整新數會比展開後的大
+    const filteredRefurb = currentDenomTotal();
 
     // Month label
     const monthLabel = allIsSelected
-      ? `月份(全部)`
+      ? `月份(全部) ${state.selectedMonths.length} 個月`
       : state.selectedMonths.map(m => { const [y, mo] = m.split('-'); return `${parseInt(y)-1911}/${mo}`; }).join('、');
 
     // Category/model label
@@ -1214,16 +1405,14 @@ window.App = (function () {
       catLabel = `大類/${cat}`;
     }
 
-    // Stats line
-    const nMonths = state.selectedMonths.length;
-    const statsLabel = `${nMonths} 個月 · RMA 返維修課 ${filteredRecords.length.toLocaleString()} 台${filteredRefurb > 0 ? ` · 正常整新流程 ${filteredRefurb.toLocaleString()} 台` : ''}`;
-
-    // 展開狀態下，下方控制項已呈現相同資訊，手機版會用 CSS 隱藏 .sbs-detail
-    // 只留「篩選」二字，避免同樣內容佔掉兩行。
+    // 收合狀態是最常看到的樣子，而且那一列很寬——兩個數量都放得下，
+    // 不必為了省空間只顯示 RMA 而讓人以為那就是全部。
     el.innerHTML = `<span class="sbs-label">篩選</span>`
       + `<span class="sbs-detail"><span class="sb-pill">${monthLabel}</span>`
       + `<span class="sb-pill">${catLabel}</span>`
-      + `<span class="sb-pill-stat">RMA 返維修課 ${filteredRecords.length.toLocaleString()} 台</span></span>`;
+      + `<span class="sb-pill-stat">RMA 返維修課 ${filteredRecords.length.toLocaleString()} 台</span>`
+      + (filteredRefurb > 0 ? `<span class="sb-pill-stat">正常整新流程 ${filteredRefurb.toLocaleString()} 台</span>` : '')
+      + `</span>`;
   }
 
   function renderGlobalRoleBanner() {
@@ -1583,6 +1772,12 @@ window.App = (function () {
     `;
   }
 
+  // 異常偵測的篩選範圍：只取大類／機種（月份由呼叫端的 lastMonth 決定）。
+  // 六個呼叫點共用，避免有人漏帶而讓某一頁的異常又變回全廠。
+  function anomalyScope() {
+    return { category: state.selectedCategory, model: state.selectedModel };
+  }
+
   function currentFilter() {
     return {
       months: state.selectedMonths,
@@ -1596,6 +1791,8 @@ window.App = (function () {
   // care + a drill-down page; the summary page then filters by role and groups
   // by severity — so each manager sees a clean, prioritised "to-track" list.
   const SEV_RANK = { critical: 0, warn: 1, info: 2 };
+  // 摘要頁最多列出幾項非 critical 的異常偵測項目；critical 不受此限，一律全列
+  const ANOM_SUMMARY_LIMIT = 6;
   const PAGE_NAME = { summary:'主管摘要', overview:'總覽', alerts:'異常偵測', parts:'零件 Pareto', cross:'跨機種矩陣', trend:'月份趨勢', reason:'故障原因', quality:'品質/SPC', batch:'製造批次', risk:'風險/根因', capa:'CAPA', cost:'成本量化', scrap:'報廢/重修', detail:'明細' };
   // 角色洞察摘要卡的標籤 → 最相關分頁，點卡片即下鑽到該頁看完整資料
   const TAG_PAGE = {
@@ -1631,11 +1828,29 @@ window.App = (function () {
       if (t.includes('保固')) ['qa', 'cs'].forEach(r => roles.add(r));
       return Array.from(roles);
     };
-    for (const a of anoms) {
+    // 摘要頁不是異常偵測頁的副本。實測 2026-09：48 張卡片裡 36 張來自異常偵測，
+    // 整份倒出來等於沒有摘要，主管看不出該先處理哪一件。
+    // 因此：critical 一律全列（不能因為版面而藏起嚴重項目），
+    // warn/info 只列最前面幾項（detectAnomalies 已依嚴重度與 metric 排序），
+    // 其餘收合成一張卡並指向異常偵測頁，數量寫清楚，不讓人以為只有這些。
+    const anomCrit = anoms.filter(a => a.severity === 'critical');
+    const anomRest = anoms.filter(a => a.severity !== 'critical');
+    const anomShown = anomRest.slice(0, ANOM_SUMMARY_LIMIT);
+    const anomHidden = anomRest.slice(ANOM_SUMMARY_LIMIT);
+    for (const a of [...anomCrit, ...anomShown]) {
       add({ sev: a.severity === 'critical' ? 'critical' : a.severity === 'warn' ? 'warn' : 'info',
         area: '異常偵測', icon: a.icon || '!', title: a.title,
         detail: `${a.subject || ''}${a.message ? '：' + a.message : ''}`,
         action: '至「異常偵測」查看完整清單與下鑽', page: 'alerts', roles: anomRoles(a) });
+    }
+    if (anomHidden.length) {
+      const warnN = anomHidden.filter(a => a.severity === 'warn').length;
+      const roles = new Set();
+      for (const a of anomHidden) anomRoles(a).forEach(r => roles.add(r));
+      add({ sev: 'info', area: '異常偵測', icon: '⋯',
+        title: `另有 ${anomHidden.length} 項異常未列出`,
+        detail: `已列出最嚴重的 ${anomCrit.length + anomShown.length} 項；其餘 ${anomHidden.length} 項（警示 ${warnN}、提示 ${anomHidden.length - warnN}）在異常偵測頁有完整清單與下鑽`,
+        action: '至「異常偵測」查看完整清單', page: 'alerts', roles: Array.from(roles) });
     }
 
     // (2) Manufacture/origin-batch flags
@@ -1762,7 +1977,7 @@ window.App = (function () {
       const denom = RepairAnalyzer.getDenominators(state.db, f);
       const kpis = RepairAnalyzer.computeKPIs(records, denom);
       const lastMonth = state.selectedMonths.slice().sort().pop();
-      const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+      const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
       const mine = summaryForRole(state.analysisRole, records, kpis, anoms);
       const crit = mine.filter(x => x.sev === 'critical').length;
       const sb = $('summaryBadge');
@@ -1790,7 +2005,7 @@ window.App = (function () {
     const denom = RepairAnalyzer.getDenominators(state.db, f);
     const kpis = RepairAnalyzer.computeKPIs(records, denom);
     const lastMonth = state.selectedMonths.slice().sort().pop();
-    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
     if (f.model && f.model !== '全部') {
       renderModelSummary(f.model, records, kpis);
       return;
@@ -1955,7 +2170,7 @@ window.App = (function () {
 
   function updateAlertBadge() {
     const lastMonth = state.selectedMonths.slice().sort().pop();
-    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
     const total = anoms.length;
     const badge = $('alertBadge');
 
@@ -2045,12 +2260,13 @@ window.App = (function () {
       ],
     },
     parts: {
-      what: '兩個區塊：① 故障零件大類根因 — 依「元件料號大類」把故障零件歸類（連接器/電源/IC/開關/機構…），看故障的「性質」。② 零件件數 Pareto — 所有更換零件依使用量排序（80/20 法則），含累計佔比折線與影響機種數。點「詳情」可查看使用此零件的所有故障記錄。',
+      what: '兩個區塊：① 故障零件大類根因 — 依「元件料號大類」把故障零件歸類（連接器/電源/IC/開關/機構…），看故障的「性質」。② 零件用量 Pareto — 所有更換零件依使用量排序（80/20 法則），含累計佔比折線與影響機種數。點「詳情」可查看使用此零件的所有故障記錄。',
       meaning: '大類分析回答「壞在哪一類零件」：連接器/排線多→組裝接觸問題；電源/電容多→電性/老化；IC 多→設計/ESD；開關/按鍵多→機構耐用度；面板/塑膠/橡膠多→外觀機構或運輸。Pareto 回答「哪幾顆零件最該管」：前 20% 零件通常佔 80% 用量，累計線 80% 以上就是重點備料清單。',
       who: '採購主管：大類佔比鎖定該找哪一類供應商；前 10 大零件是議價與安全庫存重點。硬體研發：IC/電源/連接器大類偏高 → 設計審查候選。維修主管：備料優先序一目了然。物流主管：包裝/機構類偏高可能是運輸損傷。',
       kpis: [
-        { name:'件數', formula:'選定期間此零件的換件總數量', benchmark:'依機種數量不同，趨勢穩定為正常', tip:'急速上升可能是來料批次問題' },
-        { name:'佔比', formula:'此零件件數 ÷ 所有零件總件數', benchmark:'單一零件佔比 >20% 需特別關注', tip:'單一零件佔比過高代表故障高度集中，是最優先的改善與備料標的' },
+        { name:'用量（個）', formula:'選定期間此零件的換件總「數量」加總', benchmark:'依機種數量不同，趨勢穩定為正常', tip:'這是備料要看的數字。一次維修可能換多顆同料件，所以用量會大於維修筆數' },
+        { name:'維修筆數', formula:'實際有更換此零件的維修「筆數」（同一筆維修只算一次）', benchmark:'與用量落差大 → 單次維修就換掉好幾顆，屬批量性損壞', tip:'排改善優先序要看這個，不是看用量——換 300 顆但只發生在 5 筆維修，影響面其實很小' },
+        { name:'佔比', formula:'此零件用量 ÷ 所有零件總用量', benchmark:'單一零件佔比 >20% 需特別關注', tip:'單一零件佔比過高代表故障高度集中，是最優先的改善與備料標的' },
         { name:'影響機種', formula:'有換用此零件的不同機種數', benchmark:'影響 ≥3 機種代表共用料風險', tip:'點詳情可看每個機種的故障描述' },
       ],
       tips: [
@@ -2098,21 +2314,21 @@ window.App = (function () {
       ],
     },
     quality: {
-      what: '4 個品質指標 KPI + SPC 管制圖。指標：DPPM（整體缺陷率）、報廢 DPPM（僅計報廢）、FPY 直通率（未進維修比例）、重工率（重複進廠率）。SPC 圖顯示各月故障率相對於歷史平均的位置。',
-      meaning: 'DPPM 是國際通用品質語言，方便與業界對標。SPC 圖中：CL（中心線）= 歷史平均；UCL（紅線）= 管制上限（3σ）；超過 UCL 的月份 = 製程失控，需追查特殊原因，而非正常波動。',
-      who: '品檢主管：核心戰場，每月必檢視是否有月份超出 UCL。生產主管：FPY 越高代表製程越好。董事長/財務：DPPM 是對標業界水準的語言。維修主管：重工率反映首修品質。',
+      what: '4 個品質指標 KPI + SPC 管制圖。指標：DPPM（代理）、報廢 DPPM（代理）、FPY 直通率（代理）、重工率（重複進廠率）。SPC 圖顯示各月故障率相對於合併比率的位置，管制界限依每月樣本量變動。',
+      meaning: 'DPPM 與 FPY 在本站是代理指標：分子是 RMA 維修件數，分母是同期整新數，兩者來自不同作業，不是同一批受測品的首測結果，因此只能對內看趨勢，不能當成對外報告的良率。重工率與報廢率的分子分母都在維修紀錄內，不受此限。SPC 圖中：CL（中心線）= 合併比率（總維修 ÷ 總樣本）；UCL/LCL = 逐月界限（樣本量大的月份界限窄）；σ_z = 月間實際變異相對抽樣誤差的倍數，σ_z 偏大代表每月母體不同質，此時只能當趨勢看。',
+      who: '品檢主管：核心戰場，每月檢視趨勢與超界月份。生產主管：FPY 代理值只反映「未進維修的比例」。董事長/財務：對外引用 DPPM 前要先確認分母定義。維修主管：重工率反映首修品質。',
       kpis: [
-        { name:'DPPM', formula:'維修件數 ÷ 整新數 × 1,000,000', benchmark:'消費電子 <500 為佳 · <2,000 可接受 · >10,000 需重點改善', tip:'DPPM 不等於故障率，是把比例放大到百萬基數，方便跨公司比較' },
-        { name:'報廢 DPPM', formula:'報廢件數 ÷ 整新數 × 1,000,000', benchmark:'應遠低於 DPPM；若接近 DPPM 代表大部分維修都無法修復', tip:'高報廢 DPPM 代表設計問題比製程問題更嚴重' },
-        { name:'FPY 直通率', formula:'（整新數 - 維修件數）÷ 整新數 × 100%', benchmark:'>95% 佳 · 90–95% 可接受 · <90% 需改善（本系統以整新數為代理值）', tip:'FPY 是製造業最常用的良率指標；本值為代理估算，非出廠直通率' },
-        { name:'重工率', formula:'重複進廠台數 ÷ 有序號的維修台數 × 100%', benchmark:'<3% 佳 · 3–8% 警戒 · >8% 首修品質有問題', tip:'重工代表同一台機器修了又壞，是維修技師技能或零件品質的指標' },
-        { name:'SPC UCL', formula:'歷史平均故障率 + 3 × 標準差', benchmark:'超出 UCL 的月份 = 製程失控，必須找到特殊原因', tip:'SPC 需至少 2 個月資料才能計算；建議累積 6 個月以上才有意義' },
+        { name:'DPPM（代理）', formula:'維修件數 ÷ 整新數 × 1,000,000', benchmark:'因分母是代理值，不宜直接與業界 DPPM 對標；請看自身月度趨勢', tip:'要產出可對外對標的 DPPM，需要同一母體的總受測台數與不良台數' },
+        { name:'報廢 DPPM（代理）', formula:'報廢件數 ÷ 整新數 × 1,000,000', benchmark:'應遠低於 DPPM；若接近 DPPM 代表大部分維修都無法修復', tip:'高報廢 DPPM 代表設計問題比製程問題更嚴重' },
+        { name:'FPY 直通率（代理）', formula:'（整新數 - 維修件數）÷ 整新數 × 100%', benchmark:'這是「未進維修的比例」，不是首測直通率，不能當出廠 FPY 引用', tip:'真正的 FPY 需要首測總台數、首測通過台數與重測標記（目前 Excel 未提供）' },
+        { name:'重工率', formula:'重複進廠台數 ÷ 有機器序號的維修台數 × 100%', benchmark:'<3% 佳 · 3–8% 警戒 · >8% 首修品質有問題', tip:'只計機器序號；序號其實是製令批號的機種會整個排除，否則同批多台會被誤判成同一台重修' },
+        { name:'SPC 管制界限', formula:'合併比率 p̄ ± 3 × √(p̄(1−p̄)/n_i) × σ_z（Laney p′，n_i 為當月樣本量）', benchmark:'超出界限的月份 = 需追查特殊原因；σ_z ≥ 2 時界限已放寬，不做失控判定', tip:'界限隨每月樣本量變動，所以圖上是階梯線而非直線；至少 2 個月才能計算，建議累積 6 個月以上' },
       ],
       tips: [
         'SPC 圖中，超出紅色 UCL 的月份必須找出「特殊原因」（換供應商？新批次？新操作員？）',
-        'DPPM 持續下降但 FPY 沒有提升 → 可能是整新數計算問題，請確認分母資料正確',
+        'σ_z 很大（月間變異遠大於抽樣誤差）時，先查的不是製程，而是分母：每月機種組合是否不同、整新數是否對得上同一批受測品',
         '重工率高但 DPPM 不高 → 維修品質問題（技師技能）；重工率高且 DPPM 也高 → 零件或設計問題',
-        '品檢主管可將每月 DPPM 截圖，作為每月品質績效報告依據',
+        '把 DPPM 放進對外報告前，先在報告中寫明分母是整新數的代理值，否則會被當成出廠不良率',
         '若 SPC 顯示「需至少 2 個月資料」，請繼續上傳月份資料，圖表會自動啟用',
       ],
     },
@@ -2136,8 +2352,8 @@ window.App = (function () {
       ],
     },
     risk: {
-      what: '三個區塊：① 下月維修量預測（線性回歸 + 3 月移動平均的綜合預測）② FMEA 風險矩陣（8 大部位的 S×O×D=RPN 評分，S/O/D 可手動調整）③ 故障根因樹（每個部位的維修件數、報廢數、Top 5 故障模式）。',
-      meaning: 'RPN（風險優先數）= 嚴重度(S) × 發生度(O) × 偵測度(D)。三個分數各 1–10，RPN 越高越需優先處理。系統會依資料自動計算分數，品檢主管可針對有主觀判斷的部位手動調整 S/O/D 值（調整後會保存並標記「人工調整」）。',
+      what: '三個區塊：① 下月維修量預測（線性回歸 + 3 月移動平均的綜合預測）② FMEA 風險初篩（8 大部位的 S×O×D=RPN 評分，S/O/D 可手動調整）③ 故障根因樹（每個部位的維修件數、報廢數、Top 5 故障模式）。',
+      meaning: 'RPN（風險優先數）= 嚴重度(S) × 發生度(O) × 偵測度(D)。三個分數各 1–10，RPN 越高越需優先處理。系統給的 S/O/D 是從維修紀錄反推的起始值（風險初篩），不是評分準則下的評審結論；正式 FMEA 還需要失效影響、現有控制措施、評分依據與評審人。品檢主管可逐項手動調整 S/O/D（調整後會保存並標記「人工調整」）。',
       who: '品檢主管：依 RPN 排序決定 CAPA 優先序，RPN≥200 的部位應立即開立改善專案。硬體研發：「PCB/電源」部位 RPN 高 → ECO 候選。韌體研發：「韌體/軟體」RPN 高 → 版本審查。採購/財務：預測值用於備料計劃與成本估算。廠長：根因樹中佔比最高的部位需要跨部門協調改善。',
       kpis: [
         { name:'S 嚴重度', formula:'由報廢率自動計算（報廢率越高→S越高）；可手動覆寫', benchmark:'7–10 = 嚴重（可能報廢或安全風險）· 4–6 = 中等 · 1–3 = 輕微', tip:'品檢主管應確認 S 分數符合實際嚴重程度，必要時手動調整' },
@@ -2595,7 +2811,7 @@ window.App = (function () {
 
     // Role-specific insight panel
     const lastMonth = state.selectedMonths.slice().sort().pop();
-    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
     state.currentAnomalies = anoms;
     renderRoleInsights(state.analysisRole, records, kpis, anoms);
 
@@ -2882,7 +3098,7 @@ window.App = (function () {
   // ─────────────── Alerts (full page) ───────────────
   function renderAlerts() {
     const lastMonth = state.selectedMonths.slice().sort().pop();
-    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
     state.currentAnomalies = anoms;
 
     const groups = {
@@ -3236,7 +3452,8 @@ window.App = (function () {
     const pareto = RepairAnalyzer.partPareto(records, { db: state.db });
     renderWorkNotes(records);
     const total = pareto.reduce((s, p) => s + p.count, 0);
-    $('partsMeta').textContent = `${pareto.length} 種零件 · 共 ${total.toLocaleString()} 件`;
+    const totalRepairs = pareto.reduce((s, p) => s + p.repairs, 0);
+    $('partsMeta').textContent = `${pareto.length} 種零件 · 用量 ${total.toLocaleString()} 個 · 換件 ${totalRepairs.toLocaleString()} 筆`;
 
     // ── Component-category root cause (故障零件大類) ──
     renderComponentCategory(f);
@@ -3250,7 +3467,7 @@ window.App = (function () {
         datasets: [
           {
             type: 'bar',
-            label: '件數',
+            label: '用量（個）',
             data: top.map(p => p.count),
             backgroundColor: COLORS.accent + 'cc',
             borderColor: COLORS.accent,
@@ -3314,7 +3531,9 @@ window.App = (function () {
           <span class="tag">${p.models.length} 機種</span>
           <div class="muted" style="font-size:10.5px;font-family:var(--mono);margin-top:3px">${p.models.slice(0, 4).join(', ')}${p.models.length > 4 ? '…' : ''}</div>
         </td>
-        <td class="num" style="text-align:right;font-weight:700">${p.count}</td>
+        <td class="num" style="text-align:right;font-weight:700">${p.count}
+          ${p.repairs !== p.count ? `<div class="muted" style="font-size:10px;font-weight:400" title="實際有更換此零件的維修筆數。用量大於筆數代表單次維修就換掉多顆，排改善優先序要看筆數">${p.repairs} 筆 · 每筆 ${(p.count / p.repairs).toFixed(1)} 顆</div>` : ''}
+        </td>
         <td class="num" style="text-align:right;font-size:11.5px" title="本月 vs 上月用量">${momCell}</td>
         <td>
           <div class="pwrap">
@@ -5189,30 +5408,44 @@ window.App = (function () {
 
     $('qualityMeta').textContent = `基數（整新數）${fmt.int(q.base)} · 維修 ${fmt.int(q.total)}`;
 
+    // 代理指標揭露：DPPM/FPY 的分子分母來自兩個不同作業，不是同一批受測品，
+    // 不加註會被當成正式良率往外報。
+    const proxyNote = $('qualityProxyNote');
+    if (proxyNote) {
+      proxyNote.innerHTML = `<div class="data-notice warn" style="margin:0 0 14px"><span class="dn-ico">⚠</span><div>
+        <strong>DPPM 與 FPY 是代理指標，不是正式良率</strong>——分子是 RMA 維修件數，分母是同期「整新數」。
+        兩者是兩個不同作業的數量，不是同一批受測品的首測結果，相除得到的是工作量比值。
+        要產出可對外報告的 DPPM／FPY，需要同一母體的總受測台數、首測通過台數與重測標記（目前 Excel 未提供）。
+        重工率與報廢率不受此限，它們的分子分母都在維修紀錄內。${
+          q.reworkExcludedModels.length
+            ? `<br>重工率只計機器序號：本期有 <strong>${q.reworkExcludedModels.length}</strong> 個機種的序號其實是製令批號（同批多台共用一個號碼），已整批排除，否則同批多台會被誤判成同一台重複維修。<span class="muted" title="${escapeHtml(q.reworkExcludedModels.join('、'))}">（${escapeHtml(q.reworkExcludedModels.slice(0, 6).join('、'))}${q.reworkExcludedModels.length > 6 ? ` 等 ${q.reworkExcludedModels.length} 個` : ''}）</span>`
+            : ''}</div></div>`;
+    }
+
     const dppmClass = q.dppm == null ? '' : q.dppm >= 50000 ? 'k-red' : q.dppm >= 10000 ? 'k-warn' : 'k-info';
     const fpyClass = q.fpy == null ? '' : q.fpy >= 95 ? 'k-info' : q.fpy >= 90 ? 'k-warn' : 'k-red';
     const reworkClass = q.reworkRate >= 10 ? 'k-red' : q.reworkRate >= 5 ? 'k-warn' : 'k-info';
 
     $('qualityKpi').innerHTML = `
       <div class="kpi ${dppmClass}">
-        <div class="kpi-h"><div class="kpi-l">DPPM</div><div class="kpi-ico">‰</div></div>
+        <div class="kpi-h"><div class="kpi-l">DPPM（代理）</div><div class="kpi-ico">‰</div></div>
         <div class="kpi-v">${q.dppm == null ? '—' : fmt.int(q.dppm)}</div>
-        <div class="kpi-d"><span class="muted">每百萬基數缺陷數 · 維修觸發</span></div>
+        <div class="kpi-d"><span class="muted" title="分母是整新數（代理值），不是首測受測台數">每百萬整新數的維修件數</span></div>
       </div>
       <div class="kpi k-red">
-        <div class="kpi-h"><div class="kpi-l">報廢 DPPM</div><div class="kpi-ico">✕</div></div>
+        <div class="kpi-h"><div class="kpi-l">報廢 DPPM（代理）</div><div class="kpi-ico">✕</div></div>
         <div class="kpi-v">${q.scrapDppm == null ? '—' : fmt.int(q.scrapDppm)}</div>
-        <div class="kpi-d"><span class="muted">每百萬基數報廢數</span></div>
+        <div class="kpi-d"><span class="muted">每百萬整新數的報廢件數</span></div>
       </div>
       <div class="kpi ${fpyClass}">
-        <div class="kpi-h"><div class="kpi-l">FPY 直通率</div><div class="kpi-ico">✓</div></div>
+        <div class="kpi-h"><div class="kpi-l">FPY 直通率（代理）</div><div class="kpi-ico">✓</div></div>
         <div class="kpi-v">${q.fpy == null ? '—' : fmt.pct(q.fpy)}</div>
-        <div class="kpi-d"><span class="muted">未進維修比例（代理值）</span></div>
+        <div class="kpi-d"><span class="muted" title="（整新數−維修件數）÷ 整新數；不是首測直通率">未進維修的比例，非首測</span></div>
       </div>
       <div class="kpi ${reworkClass}">
         <div class="kpi-h"><div class="kpi-l">重工率</div><div class="kpi-ico">♺</div></div>
         <div class="kpi-v">${fmt.pct(q.reworkRate)}</div>
-        <div class="kpi-d"><span class="muted">${q.reworkUnits} / ${q.uniqueUnits} 台重複進廠</span></div>
+        <div class="kpi-d"><span class="muted" title="${q.reworkExcludedModels.length ? '已排除序號為製令批號的機種：' + escapeHtml(q.reworkExcludedModels.join('、')) : '只計機器序號'}">${q.reworkUnits} / ${q.uniqueUnits} 台重複進廠</span></div>
       </div>
     `;
 
@@ -5225,9 +5458,17 @@ window.App = (function () {
       return;
     }
     const spcConfColor = { ready: 'var(--ok)', trial: 'var(--warn)', exploratory: 'var(--critical)' }[spc.confidence];
+    // 界限逐月不同（依當月樣本量），所以摘要列標明這是最新月份的界限
     note.innerHTML = `<span style="color:${spcConfColor};font-weight:600">【${spc.confidenceLabel}】</span>　`
-      + `中心線 CL = <strong>${spc.mean.toFixed(2)}%</strong> · UCL(3σ) = <strong style="color:var(--critical)">${spc.ucl.toFixed(2)}%</strong> · σ = ${spc.sigma.toFixed(2)}`
-      + (spc.outCount > 0 ? ` · <strong style="color:var(--critical)">${spc.outCount} 個月超出管制界限 ⚠</strong>` : ` · <span style="color:var(--ok)">製程穩定</span>`);
+      + `中心線 CL = <strong>${spc.mean.toFixed(2)}%</strong> · 最新月 UCL(3σ) = <strong style="color:var(--critical)">${spc.ucl.toFixed(2)}%</strong>`
+      + ` · 界限依每月樣本量變動（Laney p′，σ_z = ${spc.sigmaZ.toFixed(1)}）`
+      + (spc.outCount > 0
+          ? ` · <strong style="color:var(--critical)">${spc.outCount} 個月落在管制界限外 ⚠</strong>`
+          : spc.overdispersed ? ` · <span class="muted">界限內，但不等於製程穩定</span>`
+          : ` · <span style="color:var(--ok)">製程穩定</span>`)
+      + (spc.overdispersed
+          ? `<div class="data-notice warn" style="margin-top:10px"><span class="dn-ico">⚠</span><div><strong>這張圖只能當趨勢看</strong>——月與月之間的變異是抽樣誤差的 <strong>${spc.sigmaZ.toFixed(1)} 倍</strong>，代表每月的分母不是同一個同質母體（機種組合每月不同、分母用整新數代理、進廠與生產時間落差）。界限已依此放寬，所以「沒有超界」只代表落在放寬後的界限內，不能當作製程受控的結論。要做正式管制，需要先確定同一條產線／同一個受檢母體的每期樣本量與不良定義。</div></div>`
+          : '');
 
     const labels = spc.points.map(p => fmt.monthLabel(p.month));
     const data = spc.points.map(p => +p.faultPct.toFixed(2));
@@ -5241,17 +5482,26 @@ window.App = (function () {
           datasets: [
             { label: '故障率%', data, borderColor: COLORS.accent, backgroundColor: 'transparent',
               pointBackgroundColor: ptColors, pointRadius: 6, pointHoverRadius: 8, tension: .2, borderWidth: 2 },
-            { label: 'UCL', data: labels.map(() => +spc.ucl.toFixed(2)), borderColor: COLORS.critical,
-              borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+            // 逐點界限：樣本量大的月份界限窄、小的寬，所以這三條是階梯狀而非直線
+            { label: 'UCL', data: spc.points.map(p => +p.ucl.toFixed(2)), borderColor: COLORS.critical,
+              borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5, stepped: 'middle' },
             { label: 'CL', data: labels.map(() => +spc.mean.toFixed(2)), borderColor: COLORS.text3,
               borderDash: [3, 3], pointRadius: 0, borderWidth: 1 },
-            { label: 'LCL', data: labels.map(() => +spc.lcl.toFixed(2)), borderColor: COLORS.ok,
-              borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+            { label: 'LCL', data: spc.points.map(p => +p.lcl.toFixed(2)), borderColor: COLORS.ok,
+              borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5, stepped: 'middle' },
           ],
         },
         options: { responsive: true, maintainAspectRatio: false,
           plugins: {
             legend: { position: 'bottom' },
+            tooltip: { callbacks: {
+              // 逐點界限的前提是樣本量，看圖的人要能直接看到 n
+              afterLabel: (c) => {
+                const p = spc.points[c.dataIndex];
+                if (!p || c.datasetIndex !== 0) return '';
+                return `樣本數 n = ${fmt.int(p.denom)}　維修 ${fmt.int(p.count)} 件`;
+              },
+            } },
             // C3: annotation — mark latest month
             annotation: {
               annotations: labels.length ? {
@@ -5263,7 +5513,7 @@ window.App = (function () {
                 avgLine: {
                   type: 'line', yMin: spc.mean, yMax: spc.mean,
                   borderColor: COLORS.text3 + 'aa', borderWidth: 1, borderDash: [2, 4],
-                  label: { display: true, content: `平均 ${spc.mean.toFixed(1)}%`, position: 'end', color: COLORS.text3, font: { size: 10 } },
+                  label: { display: true, content: `合併比率 ${spc.mean.toFixed(1)}%`, position: 'end', color: COLORS.text3, font: { size: 10 } },
                 },
               } : {},
             },
@@ -5283,7 +5533,10 @@ window.App = (function () {
     const fields = [
       { key: 'date', label: '日期' }, { key: 'model', label: '機種' },
       { key: 'serial', label: '序號' }, { key: 'reason', label: '故障原因' },
-      { key: 'content', label: '故障內容' }, { key: 'part', label: '零件記錄' },
+      { key: 'content', label: '故障內容' },
+      // 換件率不是填寫率：未換件（軟體重設、僅檢測、判報廢）本來就沒有零件，
+      // 空白不等於漏填，所以這一欄用中性色階，不套 95/80/50% 的缺漏門檻。
+      { key: 'part', label: '零件換件', neutral: true },
     ];
     const monthKeys = Object.keys(state.db.months).sort().slice(-12);
     if (!monthKeys.length) { dqEl.innerHTML = ''; return; }
@@ -5298,15 +5551,21 @@ window.App = (function () {
       rates.serial  = m.records.filter(r => r.serial).length / total;
       rates.reason  = m.records.filter(r => r.reason && r.reason !== '未知').length / total;
       rates.content = m.records.filter(r => r.content).length / total;
-      rates.part    = m.records.filter(r => r.parts && r.parts.length > 0).length / total;
+      // 記錄的零件欄位是 part1/part2/part3（見 parser.js COL_ALIASES），不是 parts 陣列。
+      // 原本讀 r.parts 恆為 undefined，這一欄永遠顯示 0%。
+      rates.part    = m.records.filter(r => r.part1 || r.part2 || r.part3).length / total;
       return { month: mk, rates, total };
     });
 
-    const cell = (rate) => {
+    const cell = (rate, total, field) => {
       const pct = Math.round((rate || 0) * 100);
-      const bg = pct >= 95 ? '#22c55e' : pct >= 80 ? '#f59e0b' : pct >= 50 ? '#f97316' : '#ef4444';
-      const fg = pct >= 80 ? '#fff' : '#fff';
-      return `<td title="${pct}% 填寫率" style="padding:5px 8px;text-align:center;background:${bg}${Math.round((rate||0)*0.7*255).toString(16).padStart(2,'0')};color:${fg};font-family:var(--mono);font-size:12px;border-radius:4px">${pct}%</td>`;
+      const n = Math.round((rate || 0) * (total || 0));
+      const bg = field.neutral ? '#64748b'
+        : pct >= 95 ? '#22c55e' : pct >= 80 ? '#f59e0b' : pct >= 50 ? '#f97316' : '#ef4444';
+      const title = field.neutral
+        ? `${n}/${total} 筆有換件紀錄；未換件不等於漏填`
+        : `${pct}% 填寫率（${n}/${total} 筆）`;
+      return `<td title="${title}" style="padding:5px 8px;text-align:center;background:${bg}${Math.round((rate||0)*0.7*255).toString(16).padStart(2,'0')};color:#fff;font-family:var(--mono);font-size:12px;border-radius:4px">${pct}%</td>`;
     };
 
     dqEl.innerHTML = `
@@ -5321,7 +5580,7 @@ window.App = (function () {
         <tbody>
           ${data.map(d => `<tr>
             <td style="padding:5px 8px;font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--text2)">${fmt.monthLabel(d.month)}</td>
-            ${fields.map(f => cell(d.rates[f.key])).join('')}
+            ${fields.map(f => cell(d.rates[f.key], d.total, f)).join('')}
             <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--text3)">${d.total}</td>
           </tr>`).join('')}
         </tbody>
@@ -5332,6 +5591,10 @@ window.App = (function () {
         <span style="background:#f59e0b66;padding:2px 6px;border-radius:3px;margin-right:6px">80–94%</span>
         <span style="background:#f9731666;padding:2px 6px;border-radius:3px;margin-right:6px">50–79%</span>
         <span style="background:#ef444466;padding:2px 6px;border-radius:3px">＜50%</span>
+        <span style="background:#64748b66;padding:2px 6px;border-radius:3px;margin-left:10px">零件換件（中性欄，不適用上述門檻）</span>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--text3);line-height:1.6">
+        「零件換件」是該月有填任一故障零件（part1/2/3）的比例。未換件的維修（軟體重設、僅檢測、判報廢）本來就沒有零件，比例偏低不代表資料漏填，因此不列入缺漏判讀。
       </div>
     `;
   }
@@ -6229,7 +6492,7 @@ window.App = (function () {
     const denom = RepairAnalyzer.getDenominators(state.db, f);
     const kpis = RepairAnalyzer.computeKPIs(records, denom);
     const lastMonth = state.selectedMonths.slice().sort().pop();
-    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth);
+    const anoms = RepairAnalyzer.detectAnomalies(state.db, lastMonth, anomalyScope());
     const items = summaryForRole(role, records, kpis, anoms);
     RepairReport.generate(state.db, { role, roleInfo, items });
   }
@@ -6245,7 +6508,8 @@ window.App = (function () {
     pdbSearch: pdbSearchRender, pdbOpenEdit, pdbCloseEdit, pdbSaveEdit, pdbDelete,
     setTrendCommonOnly,
     refreshSource, setPeriod,
-    setMonth, setMonthDirect, setCategory, setModel, quickModelSearch, quickModelSearchInput,
+    setMonth, setMonthDirect, setMonthsFromSelect, setCategory, setModel, quickModelSearch, quickModelSearchInput,
+    openModelSuggest, pickModelSuggest, modelSuggestKey,
     setAnalysisRole, setSummaryFocus,
     openCapaForm, saveCapaForm, setCapaStatus, deleteCapa,
     openCostConfig, saveCostConfig, quickEstimateCost,
