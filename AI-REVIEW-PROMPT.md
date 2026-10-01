@@ -8,8 +8,8 @@
 我有一個已上線的專案想請你分析，並提出改善建議。
 
 【專案連結】
-- 線上版：https://campcool.github.io/TITAN-STAR/
-- 原始碼：https://github.com/campcool/titan-star （完整設計說明見 repo 內 DESIGN.md）
+- 線上版：https://jianjr01-pixel.github.io/TITAN-STAR/
+- 原始碼：https://github.com/jianjr01-pixel/TITAN-STAR （完整設計說明見 repo 內 DESIGN.md）
 
 ==================================================
 一、這是什麼

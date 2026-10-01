@@ -8,12 +8,12 @@
 ## 通用操作說明
 
 ### 更新報表
-到 [date/](https://github.com/Campcool/TITAN-STAR/tree/main/date) 上傳 Excel 並完成 Commit changes，再開啟網站。
+到 [date/](https://github.com/jianjr01-pixel/TITAN-STAR/tree/main/date) 上傳 Excel 並完成 Commit changes，再開啟網站。
 已開啟時按「檢查更新」。成功後預設最新報表月份；失敗會保留原資料並提示修正方法。
 詳細命名與更正版規則見同資料夾 README。
 
 ### 登入與查詢
-輸入員工編號登入；上方「型號查詢」找設備，「角色觀點」切換主管視角。
+輸入管理員建立的帳號與密碼登入（首次登入或密碼被重設後，須先設定至少 10 碼的新密碼）；上方「型號查詢」找設備，「角色觀點」切換主管視角。
 
 ### 閱讀順序
 先看「本期重點」，再看「月份趨勢」，最後到「維修明細」核對。

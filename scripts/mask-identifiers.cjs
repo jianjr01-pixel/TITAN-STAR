@@ -28,7 +28,7 @@ if (isMain && process.argv.length > 2) {
 
   if (mode === '--check') {
     // 掃全部會被公開部署的檔案，不只 data.json
-    const files = ['data.json', 'analyzer.js', 'app.js', 'parser.js', 'index.html', 'AI-HANDOFF.md', 'README.md'];
+    const files = ['data.json', 'analyzer.js', 'app.js', 'parser.js', 'report.js', 'rma.js', 'monthly-source.js', 'auth-worker.js', 'index.html', 'AI-HANDOFF.md', 'README.md'];
     let fail = 0;
     const scanned = [];
     for (const f of files) {
@@ -41,8 +41,17 @@ if (isMain && process.argv.length > 2) {
         fail++;
       }
     }
-    // 姓名：data.json 的 users.name 一律只能 1 字
     const data = JSON.parse(fs.readFileSync(target, 'utf8'));
+    // 帳號與密碼雜湊只能存在 Cloudflare Worker 的 D1 資料庫，公開的 data.json 不得出現。
+    if (data.users && Object.keys(data.users).length) {
+      console.error('✗ data.json 含有 users 帳號資料（' + Object.keys(data.users).length + ' 筆），公開檔案不得保存帳號或密碼雜湊');
+      fail++;
+    }
+    if (/"(hash|password|password_hash|passwordHash)"\s*:/.test(fs.readFileSync(target, 'utf8'))) {
+      console.error('✗ data.json 含有密碼或雜湊欄位');
+      fail++;
+    }
+    // 姓名：data.json 的 users.name 一律只能 1 字
     for (const [id, u] of Object.entries(data.users || {})) {
       if (u && typeof u.name === 'string' && [...u.name].length > 1) {
         console.error('✗ data.json users.' + id + '.name 是全名「' + u.name + '」，應只留姓氏');

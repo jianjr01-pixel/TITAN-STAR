@@ -14,7 +14,7 @@ TITAN-STAR 是一個**純前端（vanilla JS、無後端）的電子工廠維修
 CAPA、COPQ、批次追溯、預測），並以**「主管角色視角」**把雜亂的發現整理成各級
 主管各自應追蹤的摘要。部署在 GitHub Pages。
 
-- 線上版：`https://campcool.github.io/TITAN-STAR/`
+- 線上版：`https://jianjr01-pixel.github.io/TITAN-STAR/`
 - 主要使用者：50–60 歲的工廠主管／品保人員（因此特別重視大字級與行動裝置體驗）
 
 ---
@@ -90,14 +90,8 @@ CAPA、COPQ、批次追溯、預測），並以**「主管角色視角」**把�
 - 圖表：Chart.js 4.4（CDN）。
 - Excel 解析：SheetJS / xlsx 0.18（CDN）。
 - 字型：Inter + Noto Sans TC + JetBrains Mono（Google Fonts）。
-- 資料持久化：`localStorage`（**純本機，各裝置各一份，不共用**）+ `data.json`（隨站的唯讀快照，
-  由匯入腳本寫進 repo，前端不回寫）。CAPA 與 RMA 目前都在 localStorage，**不是共用案件平台**；
-  多人協作的規劃見 [`M365-協作整合規劃.md`](M365-協作整合規劃.md)（後續改版建議，尚未實作）。
-- 部署：GitHub Pages，**由 GitHub Actions 發佈**（`.github/workflows/site-check.yml` 的 deploy job），
-  發佈內容是 `scripts/prepare-pages-artifact.sh` 產出的 `_site/`，**不是分支根目錄**——
-  內部文件（`*.md`、`scripts/`、`tests/`、Excel 範本）都被刻意排除在公開站之外。
-- CI：`site-check.yml`（語法檢查、`node --test`、去識別化、版本錨點、離線單檔同步）
-  與 `pages-self-check.yml`（確認 Pages 來源維持 `build_type=workflow`，避免退回分支發佈而繞過門禁）。
+- 資料持久化：`localStorage`（本機）+ `data.json`（雲端同步的快照）。
+- 部署：GitHub Pages，從 `main` 分支根目錄直接發佈（無 CI workflow）。
 
 ### 3.2 檔案結構與職責
 
@@ -124,7 +118,7 @@ CAPA、COPQ、批次追溯、預測），並以**「主管角色視角」**把�
 ### 3.4 全域命名空間
 
 各模組掛在 `window` 上：`RepairParser`、`RepairAnalyzer`、`App`、`RepairReport`、
-`RepairDB`、`Auth`、`RMA`。`app.js` 以 `window.App = (function(){ ... })()` 的 IIFE 封裝。
+`RepairDB`、`Auth`（`auth-worker.js`，登入畫面；驗證在 Cloudflare Worker）、`TitanUI`（快捷鍵、通知、延遲載入圖表）、`RMA`。`app.js` 以 `window.App = (function(){ ... })()` 的 IIFE 封裝。
 
 ---
 
@@ -177,7 +171,8 @@ condition  '全新' | '整新' | ''（目前全為 ''，見 §2.4）
 - **重複/跨期**：`repeatedSerials`、`crossMonthSerials`（同序號跨月再進廠 = 未根治）、
   `crossModelParts`
 - **品質工程**：
-  - `spcAnalysis` — SPC p 管制圖（UCL/LCL，找特殊原因點）
+  - `spcAnalysis` — SPC p 管制圖。中心線 p̄ = Σ維修數 / Σ整新數，每月依自己的整新數 n_i 算 p̄ ± 3√(p̄(1−p̄)/n_i)；過度離散（σz > 1.5）時自動改用 Laney p′。分子分母是否同一母體尚待業務確認，只作趨勢參考。
+  - `qualityMetrics` — DPPM、未進維修比例（FPY 代理）皆為「維修數 ÷ 整新數」的代理值，不是正式不良率／直通率；重工率只計機器序號，生產序號（製令批號）排除。
   - `fmeaAnalysis` — FMEA 風險（RPN = 嚴重度 S × 發生度 O × 偵測度 D）
   - `rootCauseTree` / `classifyFault` — 根因分類樹
   - `detectAnomalies` — 異常偵測（用量暴增、報廢集中、重複故障…）
@@ -235,11 +230,9 @@ COPQ)、`scrap`(報廢&重修)、`detail`(明細資料)。
 
 ## 8. 無障礙與 RWD（因使用者為長輩）
 
-- **沒有字級切換功能**（與 SOP 一致）。早期的 `html[data-fontscale]` + `body { zoom }`
-  三段縮放已移除（殘留該功能的舊版單檔 `TITAN-STAR-morandi.html` 已於 2026-09-17 刪除）。
-  改用固定字級 + 響應式版面，使用者需要放大時用瀏覽器縮放。
-- 字級固定 px，**瀏覽器/系統的字級設定對本站無效**，所以最小字級要自己顧；
-  目前手機下限 13.5px（見 AI-HANDOFF「字級策略」）。
+- **顯示大小切換**（標題列）：標準/大/特大，透過 `html[data-fontscale]` + `body { zoom }`
+  全站等比縮放，**預設「大」**；設定存 `localStorage`，在繪製前套用避免閃爍。
+- 基礎字級 19px，最小字級已整體上調。
 - **行動裝置導覽**：≤1100px 時側欄改為**漢堡選單 + 滑出抽屜 + 遮罩**（修復了先前
   「側欄直接 display:none 導致手機完全無導覽」的重大缺陷）。
 - 手機斷點：KPI 單欄、加大觸控目標、隱藏次要按鈕。
@@ -287,13 +280,13 @@ COPQ)、`scrap`(報廢&重修)、`detail`(明細資料)。
 
 ## 2026-09-07 月報交接設計
 
-日期來源為 Campcool/TITAN-STAR/date，不是 TITAN-STAR/monthly-reports。date 同時接受月維修報表與當月整新故障矩陣；兩者以檔名類型加月份分別做版本判斷，整批解析成功後才一起套用。
+日期來源為 jianjr01-pixel/TITAN-STAR/date，不是 TITAN-STAR/monthly-reports。date 同時接受月維修報表與當月整新故障矩陣；兩者以檔名類型加月份分別做版本判斷，整批解析成功後才一起套用。
 monthly-source.js 在每次開啟時讀 GitHub contents 清單，使用 blob SHA 識別變更及驗證下載內容。
 本機以 sourceImport.files 保存來源版本；本機已有來源版本時，不可被舊 data.json 月份覆蓋。
 未通過整批驗證不提交本機狀態；空間不足時保留本次記憶體資料。個資遮罩與 CLI 共用 privacy.js。
 新版首頁採用現有色彩、字級與間距 token，新增期間／更新狀態、可展開的歷史期間選項及三步閱讀導覽。
 型號查詢仍在最上方；首頁預設最新月份。新資料以資料年月而非電腦年月為基準。
-原始 data.json 的料件主檔、機種補充與帳號來源保留；不將年度分佈當作當月故障率分母。
+原始 data.json 的料件主檔、機種補充保留（帳號自 2026-09-30 起改存 Cloudflare Worker D1，data.json 不得含帳號）；不將年度分佈當作當月故障率分母。
 
 篩選列的數字不可脫離語意單獨呈現。月份、大類與機種一律使用「RMA 返維修課 N 台」；月份總數使用「N 個月」；另一個作業量使用「正常整新流程 N 台」。收合摘要也必須保留完整流程名稱，讓第一次登入的使用者不需猜測數字含義。兩者是不同作業流程的數量，不可因同時呈現而暗示能直接相除為故障率。
 

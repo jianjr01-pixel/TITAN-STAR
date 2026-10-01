@@ -18,6 +18,9 @@ function runImport(fixturePath, dataPath, extraArgs = []) {
       cwd: root,
       encoding: 'utf8',
       env: { ...process.env },
+      // 損壞檔案案例預期會失敗；保留在 Error 物件中供斷言使用，
+      // 不把預期的 stderr 混進成功測試的終端機輸出。
+      stdio: ['ignore', 'pipe', 'pipe'],
     }),
   );
 }

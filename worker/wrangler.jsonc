@@ -1,0 +1,16 @@
+{
+  "name": "titan-star-auth",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-16",
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "titan-star-auth",
+    "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    "migrations_dir": "migrations"
+  }],
+  "vars": {
+    "ALLOWED_ORIGIN": "https://jianjr01-pixel.github.io",
+    "GITHUB_OWNER": "jianjr01-pixel",
+    "GITHUB_REPO": "TITAN-STAR"
+  }
+}

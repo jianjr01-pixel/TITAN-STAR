@@ -1,0 +1,9 @@
+node_modules/
+_site/
+work/
+.test-*.json
+.test-*.xlsx
+admin.sql
+worker/admin.sql
+worker/node_modules/
+worker/.wrangler/

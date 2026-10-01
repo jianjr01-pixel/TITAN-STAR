@@ -64,4 +64,4 @@ try {
   process.exit();
 }
 
-console.log('Done. 請同步更新 AI-HANDOFF.md 的版本歷史後再 commit。');
+console.log('Done. 請在 CHANGELOG.md 最上方補上版本說明後再 commit。');

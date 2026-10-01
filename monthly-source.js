@@ -1,8 +1,8 @@
 // Shared browser/Node contract: folder discovery, revision selection and atomic import.
 (function (root) {
   'use strict';
-  const SOURCE = 'https://api.github.com/repos/Campcool/TITAN-STAR/contents/date?ref=main';
-  const RAW = 'https://raw.githubusercontent.com/Campcool/TITAN-STAR/main/';
+  const SOURCE = 'https://api.github.com/repos/jianjr01-pixel/TITAN-STAR/contents/date?ref=main';
+  const RAW = 'https://raw.githubusercontent.com/jianjr01-pixel/TITAN-STAR/main/';
   const VERSION = 1;
   const clone = value => JSON.parse(JSON.stringify(value));
   function monthInfo(name) {

@@ -26,7 +26,7 @@ for (const file of ['parser.js', 'analyzer.js']) vm.runInContext(fs.readFileSync
     ...Object.entries(db.months).map(([m, v]) => `| ${m} | ${v.records.length} |`), '',
     `最新分析月份：${db.sourceImport.latestMonth}`, '',
     `整新故障補充：${Object.values(db.modelSupplements || {}).filter(x => x.sourceType === 'wireless-overview-v1').length} 個機種`, '', ...result.warnings,
-    '', '開啟 https://campcool.github.io/TITAN-STAR/ 即會檢查這批 Excel。無須改程式或重新部署。'].join('\n');
+    '', '開啟 https://jianjr01-pixel.github.io/TITAN-STAR/ 即會檢查這批 Excel。無須改程式或重新部署。'].join('\n');
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
 })().catch(error => {

@@ -43,25 +43,6 @@
 .source-status[data-state="error"] span::before { content: '更新提醒：'; font-weight: 700; }
 .source-warnings:empty { display: none; }
 .report-reading { border-top: 1px solid var(--border); padding-top: var(--space-stack); }
-
-/* 非首頁的精簡版：只留「分析期間 + 切換範圍」一行。
-   完整面板在每一頁重複出現會吃掉近 400px 首屏，把該頁真正的內容擠下去。
-   期間與範圍在上方篩選列本來就看得到，這裡不需要再講一次。
-   例外：更新失敗要在每一頁都看得到，不能因為版面而被藏起來。 */
-.monthly-context[data-compact="true"] {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-inline);
-  padding: var(--space-inline) var(--space-stack);
-  margin-bottom: var(--space-stack);
-}
-.monthly-context[data-compact="true"] h2 { font-size: var(--text-body-lg); }
-.monthly-context[data-compact="true"] #monthlyContextNote,
-.monthly-context[data-compact="true"] .report-reading,
-.monthly-context[data-compact="true"] .source-warnings,
-.monthly-context[data-compact="true"] .source-status { display: none; }
-.monthly-context[data-compact="true"] .source-status[data-state="error"] {
-  display: flex; flex-basis: 100%; margin-top: 0; padding-top: var(--space-inline);
-}
-.monthly-context[data-compact="true"] .period-options { margin-top: 0; }
 @media (max-width: 600px) {
   .monthly-context h2 { font-size: var(--fs-20); }
   .source-status { align-items: flex-start; flex-direction: column; }
@@ -171,15 +152,10 @@
   --header: 52px;   /* 對齊上方 mode-bar 高度 */
   --subbar: 56px;
 
-  /* Type
-     離線／file:// 開啟時 Google Fonts 不會載入（index.html 刻意不發那個請求），
-     所以每一組都要排到系統內建的中文字體才不會掉成細明體：
-     Windows 走「微軟正黑體」，macOS/iOS 走「蘋方」，Android 走 Noto Sans CJK。 */
-  --cjk-fallback: 'Microsoft JhengHei', '微軟正黑體', 'PingFang TC', 'Heiti TC',
-                  'Noto Sans CJK TC', 'Source Han Sans TC';
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --sans: 'Inter', 'Noto Sans TC', var(--cjk-fallback), system-ui, -apple-system, sans-serif;
-  --friendly: 'Iansui', 'Noto Sans TC', var(--cjk-fallback), system-ui, -apple-system, sans-serif;
+  /* Type */
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: 'Inter', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+  --friendly: 'Iansui', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
 }
 
 /* 20260722: model supplemental summary workbook support */
@@ -762,6 +738,11 @@ button, input, select { font-family: inherit; }
 .subbar.collapsed .subbar-arrow { transform: rotate(180deg); }
 .subbar.collapsed #subbarBody { display: none; }
 .subbar.collapsed .subbar-toggle { margin-bottom: 0; }
+.sb-label {
+  font-size: var(--fs-14); color: var(--text3);
+  letter-spacing: .12em; text-transform: uppercase; font-weight: 600;
+  min-width: 64px;
+}
 .model-lookup-row { flex-wrap: nowrap; }
 .model-lookup-input {
   width: min(560px, 100%);
@@ -1756,23 +1737,11 @@ button, input, select { font-family: inherit; }
   border-left: 1px solid var(--border);
   z-index: 2510;
   transform: translateX(100%);
-  /* 只靠 transform 藏抽屜是不夠的：model-profile 變體是置中對話框，
-     它「關閉」時的 transform 是 translate(-50%, 24px)，位置就在畫面正中央，
-     移除 .open 之後會原地留著關不掉（桌機限定，手機版是 translateY(100%) 才沒事）。
-     改用 visibility + opacity 收尾，任何變體、任何斷點都真的會消失。
-     visibility 延遲到位移動畫結束才切換，滑出動畫才不會被截斷。 */
-  opacity: 0;
-  visibility: hidden;
-  transition: transform .25s cubic-bezier(.4,0,.2,1), opacity .2s ease, visibility 0s .25s;
+  transition: transform .25s cubic-bezier(.4,0,.2,1);
   display: flex; flex-direction: column;
   box-shadow: -8px 0 32px rgba(0,0,0,.4);
 }
-.drawer.open {
-  transform: translateX(0);
-  opacity: 1;
-  visibility: visible;
-  transition: transform .25s cubic-bezier(.4,0,.2,1), opacity .2s ease, visibility 0s;
-}
+.drawer.open { transform: translateX(0); }
 .drawer.model-profile {
   top: 4dvh;
   left: 50%;
@@ -2091,6 +2060,7 @@ button, input, select { font-family: inherit; }
 .btn .ico { font-size: var(--fs-16); }
 
 /* ── Sub-bar chips ── */
+.sb-label { font-size: var(--fs-15); }
 .chip { font-size: var(--fs-16); padding: var(--space-8) var(--space-16); }
 .chip .num { font-size: var(--fs-15); }
 
@@ -3430,66 +3400,10 @@ button, input, select { font-family: inherit; }
   }
 }
 
-/* ② 篩選抽屜：左邊下拉切換、右邊目前範圍總結。
-   原本桌機是把每個月份與大類都攤成 chip（兩排大按鈕），展開時吃掉整個首屏；
-   實際上這些是「偶爾才改一次」的設定，不需要常駐佔版面。 */
-/* 下拉直向堆疊（窄欄），把省下來的寬度讓給右邊的範圍說明。
-   下拉本來並排時，右邊只塞得下一張小卡；改成堆疊後右欄夠寬，
-   範圍就能寫成看得懂的說明，而不是一串沒有上下文的數字。 */
-/* 兩欄等高：左欄只有 2–3 個下拉、右欄是完整說明，若各自貼齊頂端，
-   左邊下方會空出一大塊。改成兩個同樣款式的面板並 stretch，
-   空白就落在面板內部，讀起來是版面而不是破洞。 */
-.subbar-controls {
-  display: grid; grid-template-columns: minmax(320px, 480px) 1fr;
-  gap: var(--space-20); align-items: stretch;
-}
-.sb-filters {
-  display: flex; flex-direction: column; gap: var(--space-8); min-width: 0;
-  padding: var(--space-14) var(--space-18);
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius-10);
-}
-.sb-filters-h { color: var(--text3); font-size: var(--fs-13); font-weight: 700; letter-spacing: .06em; margin-bottom: var(--space-4); }
-.sb-field { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: var(--space-10); min-width: 0; }
-.sb-field-months { align-items: start; }
-.sb-field-months .sb-field-l { padding-top: var(--space-8); }
-.sb-months { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
-/* 多選清單：原生 multiple 就支援 Ctrl／⌘ 與 Shift，不自己造輪子 */
-.sb-multi { height: auto; padding: var(--space-4); cursor: default; }
-.sb-multi option { padding: var(--space-6) var(--space-8); border-radius: var(--radius-8); }
-.sb-multi option:checked { background: var(--accent-soft); color: var(--text); font-weight: 700; }
-.sb-months-hint {
-  display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap;
-  color: var(--text3); font-size: var(--fs-12);
-}
-.sb-mini-btn {
-  padding: var(--space-3) var(--space-8); border: 1px solid var(--border2);
-  border-radius: var(--radius-8); background: var(--surface); color: var(--text2);
-  font: inherit; font-size: var(--fs-12); cursor: pointer;
-}
-.sb-mini-btn:hover { border-color: var(--accent); color: var(--text); }
-.sb-field-l { color: var(--text3); font-size: var(--fs-13); font-weight: 700; white-space: nowrap; }
-.sb-scope {
-  min-width: 0;
-  padding: var(--space-14) var(--space-18);
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius-10); font-size: var(--fs-14); line-height: 1.7;
-}
-.sb-scope-h { color: var(--text3); font-size: var(--fs-13); font-weight: 700; letter-spacing: .06em; margin-bottom: var(--space-8); }
-.sb-scope-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--space-4) var(--space-16); align-items: baseline; }
-.sb-scope-k { color: var(--text2); white-space: nowrap; }
-.sb-scope-v { color: var(--text); font-weight: 700; }
-.sb-scope-v .n { font-family: var(--mono); font-size: var(--fs-16); }
-.sb-scope-v .sub { color: var(--text3); font-weight: 400; font-size: var(--fs-13); margin-left: var(--space-8); }
-.sb-scope-note {
-  margin-top: var(--space-10); padding-top: var(--space-8);
-  border-top: 1px solid var(--border); color: var(--text2); font-size: var(--fs-13); line-height: 1.7;
-}
-@media (max-width: 1100px) {
-  .subbar-controls { grid-template-columns: 1fr; }
-}
-@media (max-width: 820px) {
-  .sb-field { grid-template-columns: 1fr; gap: var(--space-4); }
+/* ② 月份/大類：手機顯示下拉選單，桌機顯示 chip */
+.subbar-mobile-row {
+  display: none;
+  gap: var(--space-10); align-items: center; margin-bottom: var(--space-4);
 }
 .sb-select {
   flex: 1; min-width: 0;
@@ -3499,8 +3413,12 @@ button, input, select { font-family: inherit; }
   font-size: var(--fs-15); font-family: inherit; cursor: pointer;
 }
 .sb-select:focus { outline: none; border-color: var(--accent); }
+@media (max-width: 820px) {
+  .subbar-mobile-row { display: flex; }
+  .subbar-chips-row  { display: none !important; }
+}
 @media (max-width: 480px) {
-  .sb-filters { align-items: stretch; }
+  .subbar-mobile-row { flex-direction: column; align-items: stretch; }
   .sb-select { width: 100%; }
 }
 
@@ -4170,38 +4088,6 @@ body {
 .top-control-model {
   flex: 1.35 1 640px;
   border-left: 4px solid var(--accent);
-  position: relative;   /* 型號建議清單的定位基準 */
-}
-
-/* ══════════ 型號建議清單（取代原生 datalist）══════════
-   原生 datalist 的面板由瀏覽器繪製，CSS 完全無效，會在淺色主題上
-   冒出系統深色面板。自製面板才吃得到主題、字體與大類色點。 */
-.model-drop {
-  position: absolute; left: 0; right: 0; top: calc(100% + 6px);
-  max-height: 60vh; overflow-y: auto; z-index: 600;
-  background: var(--surface); border: 1px solid var(--border2);
-  border-radius: var(--radius-12); padding: var(--space-6);
-  box-shadow: 0 12px 32px rgba(15,23,42,.18);
-}
-.model-drop[hidden] { display: none; }
-.model-drop-item {
-  display: grid; grid-template-columns: 10px 1fr auto;
-  align-items: center; gap: var(--space-10);
-  width: 100%; min-height: 44px;            /* 觸控目標 */
-  padding: var(--space-8) var(--space-10);
-  background: transparent; border: none; border-radius: var(--radius-8);
-  color: var(--text); font: inherit; text-align: left; cursor: pointer;
-}
-.model-drop-item:hover,
-.model-drop-item.active { background: var(--accent-soft); }
-.model-drop-item .mdi-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
-.model-drop-item .mdi-name { font-family: var(--mono); font-size: var(--fs-15); font-weight: 600; }
-.model-drop-item .mdi-name b { color: var(--accent); font-weight: 800; }
-.model-drop-item .mdi-meta { color: var(--text3); font-size: var(--fs-13); white-space: nowrap; }
-.model-drop-empty { padding: var(--space-12); color: var(--text3); font-size: var(--fs-14); }
-@media (max-width: 620px) {
-  .model-drop-item { grid-template-columns: 10px 1fr; row-gap: var(--space-3); }
-  .model-drop-item .mdi-meta { grid-column: 2; }
 }
 
 .top-control-role {
@@ -4346,7 +4232,8 @@ body {
 
 .kpi-l,
 .card-t,
-.snav-h {
+.snav-h,
+.sb-label {
   letter-spacing: .03em;
   text-transform: none;
 }

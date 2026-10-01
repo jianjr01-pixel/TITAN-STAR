@@ -1,6 +1,6 @@
 # 每月維修與整新故障報表：接手者只需上傳 Excel
 
-分析網站：https://campcool.github.io/TITAN-STAR/
+分析網站：https://jianjr01-pixel.github.io/TITAN-STAR/
 
 ## 每次更新只做三件事
 

@@ -26,7 +26,7 @@ const root = path.resolve(import.meta.dirname, '..');
 // 因此唯一能降低曝光的手段就是不要被搜尋引擎收錄。
 //
 // 刻意不用 robots.txt：(1) 專案頁的 robots.txt 必須放在網域根目錄
-// campcool.github.io/robots.txt，那需要另一個 repo；(2) 對「已收錄、想移除」
+// jianjr01-pixel.github.io/robots.txt，那需要另一個 repo；(2) 對「已收錄、想移除」
 // 的情境，擋掉爬取會讓 Google 看不到 noindex，網址反而可能以「僅網址」
 // 形式留在索引裡。正解是只加 noindex、不擋爬取。
 //
@@ -34,7 +34,6 @@ const root = path.resolve(import.meta.dirname, '..');
 // 設 X-Robots-Tag 標頭，所以它技術上仍可被抓取。要真正擋住需要換架構
 // （例如 Cloudflare Pages + Access）。詳見 AI-HANDOFF「公開曝光」章節。
 test('internal tool pages carry noindex', (t) => {
-  // TITAN-STAR-morandi.html（舊版 app 單檔複本）已於 2026-09-17 移除，不再納入。
   const pages = ['index.html', 'TITAN-STAR.html'];
   const checked = [];
   for (const page of pages) {

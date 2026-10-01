@@ -14,6 +14,9 @@ const cacheNames = [...swJs.matchAll(/titan-star-v([\w.-]+)/g)].map((m) => m[1])
 
 const errors = [];
 if (vParams.length === 0) errors.push('index.html 找不到 ?v= 版本參數');
+// 每個本地 JS／CSS 都必須帶 ?v=，否則改版後瀏覽器可能繼續用舊快取。
+const localAssets = [...indexHtml.matchAll(/<(?:script[^>]+src|link[^>]+href)="(?!https?:|data:)([^"]+\.(?:js|css)(?:\?[^"]*)?)"/g)].map((m) => m[1]);
+for (const asset of localAssets) if (!/\?v=/.test(asset)) errors.push('index.html 的 ' + asset + ' 缺少 ?v= 版本參數');
 if (cacheNames.length === 0) errors.push('sw.js 找不到 CACHE_NAME 版本字串');
 const vSet = new Set(vParams);
 if (vSet.size > 1) errors.push('index.html 內有多個不同 ?v= 參數: ' + [...vSet].join(', '));

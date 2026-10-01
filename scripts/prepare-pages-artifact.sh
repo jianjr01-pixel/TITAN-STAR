@@ -23,14 +23,9 @@ readonly -a public_rules=(
   '/*.css'
   '/data.json'
   '/manifest.json'
-  '/vendor/'
-  '/vendor/*.js'
 )
 readonly -a required_paths=(
   'index.html'
-  'TITAN-STAR.html'
-  'vendor/chart.umd.js'
-  'vendor/xlsx.full.min.js'
   'app.js'
   'monthly-source.js'
   'privacy.js'
@@ -41,7 +36,6 @@ readonly -a required_paths=(
 )
 readonly -a denied_paths=(
   'AI-HANDOFF.md'
-  'vendor/README.md'
   '.claude'
   'scripts'
   'tests'
