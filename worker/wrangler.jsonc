@@ -5,7 +5,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "titan-star-auth",
-    "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    "database_id": "b622b1d9-8d83-49d5-892a-d7166b512645",
     "migrations_dir": "migrations"
   }],
   "vars": {
