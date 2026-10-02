@@ -65,6 +65,7 @@ window.App = (function () {
     selectedMonths: [],       // [] = all
     selectedCategory: '全部',
     selectedModel: '全部',
+    modelQueryMonth: '__latest__', // 型號查詢的月份：'__latest__' | '__all__' | 'YYYY-MM'
     currentPage: 'summary',
     analysisRole: 'all',
     summaryFocus: 'critical',
@@ -863,6 +864,17 @@ window.App = (function () {
         return `<option value="${m}">${label}</option>`;
       }).join('');
     }
+    const monthSel = $('modelQueryMonth');
+    if (monthSel) {
+      const dbMonthsDesc = Object.keys(state.db.months).sort().reverse();
+      if (state.modelQueryMonth !== '__latest__' && state.modelQueryMonth !== '__all__' && !dbMonthsDesc.includes(state.modelQueryMonth)) {
+        state.modelQueryMonth = '__latest__';
+      }
+      monthSel.innerHTML = `<option value="__latest__">最新月份${dbMonthsDesc[0] ? `（${fmt.monthLabel(dbMonthsDesc[0])}）` : ''}</option>`
+        + dbMonthsDesc.map(mk => `<option value="${mk}">${fmt.monthLabel(mk)}</option>`).join('')
+        + '<option value="__all__">全部月份（累計）</option>';
+      monthSel.value = state.modelQueryMonth;
+    }
     const modelInput = $('modelQuickSearch');
     if (modelInput && document.activeElement !== modelInput) {
       modelInput.value = state.selectedModel === '全部' ? '' : state.selectedModel;
@@ -996,7 +1008,9 @@ window.App = (function () {
     lastAutoModelSearch = fuzzy;
     state.selectedCategory = '全部';
     state.selectedModel = fuzzy;
-    state.selectedMonths = RepairMonthlySource.range(Object.keys(state.db.months), 1);
+    const dbMonths = Object.keys(state.db.months).sort();
+    const queryMonth = resolveModelQueryMonth();
+    state.selectedMonths = queryMonth === '__all__' ? dbMonths.slice() : [queryMonth].filter(Boolean);
     // 必須真正切換頁面 DOM（.page.active / 導覽高亮），
     // 否則在其他分頁搜尋時結果會渲染進隱藏的摘要頁，看起來像沒反應
     if (state.currentPage !== 'summary') {
@@ -1009,7 +1023,24 @@ window.App = (function () {
     }
     saveFilterState();
     collapseSubbar();
-    setTimeout(() => openModelDrawer(fuzzy, state.selectedMonths.slice().sort().pop()), 80);
+    setTimeout(() => openModelDrawer(fuzzy, queryMonth), 80);
+  }
+
+  // 型號查詢的月份條件：'__latest__' 轉成實際最新月份；'__all__' 代表全部月份累計
+  function resolveModelQueryMonth() {
+    const dbMonths = Object.keys(state.db.months).sort();
+    const v = state.modelQueryMonth;
+    if (v === '__all__') return '__all__';
+    if (v && v !== '__latest__' && dbMonths.includes(v)) return v;
+    return dbMonths[dbMonths.length - 1] || '__all__';
+  }
+
+  function setModelQueryMonth(value) {
+    state.modelQueryMonth = value || '__latest__';
+    const input = $('modelQuickSearch');
+    const q = (input && input.value.trim()) || (state.selectedModel !== '全部' ? state.selectedModel : '');
+    // 已有查詢中的型號 → 直接用新月份重查；否則只記住條件，下次查詢時套用
+    if (q) quickModelSearch(q);
   }
 
   // ─────────────── Render orchestration ───────────────
@@ -1928,7 +1959,7 @@ window.App = (function () {
       <div class="kpi k-info"><div class="kpi-h"><div class="kpi-l">換修率</div><div class="kpi-ico">%</div></div>
         <div class="kpi-v">${pctStr(M.rate)}</div><div class="kpi-d"><span class="muted">依目前匯入月份計算</span></div></div>
       <div class="kpi k-warn"><div class="kpi-h"><div class="kpi-l">最常換零件</div><div class="kpi-ico">▤</div></div>
-        <div class="kpi-v">${topPart ? fmt.int(topPart.count) : '0'}</div><div class="kpi-d"><span class="muted">${topPart ? escapeHtml(pdbLabel(topPart.name)) : '目前無零件資料'}</span></div></div>
+        <div class="kpi-v">${topPart ? fmt.int(topPart.count) : '0'}</div><div class="kpi-d"><span class="muted">${topPart ? pdbLabel(topPart.name) : '目前無零件資料'}</span></div></div>
       <div class="kpi k-red"><div class="kpi-h"><div class="kpi-l">主要故障</div><div class="kpi-ico">!</div></div>
         <div class="kpi-v">${topReason ? fmt.int(topReason[1]) : '0'}</div><div class="kpi-d"><span class="muted">${topReason ? escapeHtml(topReason[0]) : '目前無原因資料'}</span></div></div>
     `;
@@ -4409,14 +4440,17 @@ window.App = (function () {
           <div class="empty"><div class="empty-t">目前月報尚未匯入這個型號的逐筆維修紀錄；上方先顯示補充彙總資料。</div></div>
         </div>`;
     }
-    const { reasons, contents } = RepairAnalyzer.reasonBreakdown(modelRecords);
-    const recentRecords = modelRecords.slice()
-      .sort((a, b) => (b.date || b._monthKey || '').localeCompare(a.date || a._monthKey || ''))
-      .slice(0, 12);
     const allDbMonths = Object.keys(state.db.months).sort();
     const sortedMonths = state.selectedMonths.slice().sort();
     const isAll = focusMonth === '__all__';
-    const curMonth = isAll ? '__all__' : (focusMonth || sortedMonths[sortedMonths.length - 1]);
+    const curMonth = isAll ? '__all__' : (focusMonth || sortedMonths[sortedMonths.length - 1] || allDbMonths[allDbMonths.length - 1]);
+    const scopeLabel = isAll ? '全部月份' : fmt.monthLabel(curMonth);
+    // 故障原因、最近紀錄都跟著目前選的月份走（之前固定用全部月份，和零件區塊口徑不一致）
+    const scopedRecords = isAll ? modelRecords : modelRecords.filter(r => r._monthKey === curMonth);
+    const { reasons, contents } = RepairAnalyzer.reasonBreakdown(scopedRecords);
+    const recentRecords = scopedRecords.slice()
+      .sort((a, b) => (b.date || b._monthKey || '').localeCompare(a.date || a._monthKey || ''))
+      .slice(0, 12);
     const cur = history.find(h => h.month === curMonth) || { count: 0, denom: 0, topParts: [] };
 
     // Aggregate: total over all months
@@ -4467,8 +4501,8 @@ window.App = (function () {
     const catalogShownParts = catalogPartsForMonths(partMonthKeys);
     const detailFocusedParts = isAll
       ? allTopParts
-      : RepairAnalyzer.aggregateParts(modelRecords.filter(r => r._monthKey === curMonth));
-    const detailShownParts = detailFocusedParts.map(p => ({ ...p, label: pdbLabel(p.name), denom: null, rate: null }));
+      : RepairAnalyzer.aggregateParts(scopedRecords);
+    const detailShownParts = detailFocusedParts.map(p => ({ ...p, label: pdbText(p.name), labelHtml: pdbLabel(p.name), denom: null, rate: null }));
     const shownParts = catalogShownParts.length ? catalogShownParts : detailShownParts;
     const partSourceLabel = catalogShownParts.length ? '首頁整新數' : '維修明細無分母';
     const partsTitle = isAll ? '累計最常更換零件' : `${fmt.monthLabel(curMonth)} 最常更換零件`;
@@ -4490,7 +4524,7 @@ window.App = (function () {
       </div>`;
     const recordParts = (r) => [r.part1Norm, r.part2Norm, r.part3Norm]
       .filter(Boolean)
-      .map(p => `<button class="model-record-part" onclick="event.stopPropagation();App.openPartDrawer('${escapeAttr(p)}')">${escapeHtml(pdbLabel(p))}</button>`)
+      .map(p => `<button class="model-record-part" onclick="event.stopPropagation();App.openPartDrawer('${escapeAttr(p)}')" title="${escapeHtml(pdbText(p))}">${pdbLabel(p)}</button>`)
       .join('');
 
     // Month navigation tabs (allow switching within drawer)
@@ -4510,6 +4544,7 @@ window.App = (function () {
           `).join('')}
         </div>
         <button class="dmn-arrow" ${nextMonth ? `onclick="App.openModelDrawer('${escapeAttr(modelName)}','${nextMonth}')"` : 'disabled'}>下一月 →</button>
+        <button class="dmn-tab dmn-tab-all ${isAll ? 'active' : ''}" onclick="App.openModelDrawer('${escapeAttr(modelName)}','__all__')">全部月份</button>
       </div>
     ` : '';
 
@@ -4545,7 +4580,7 @@ window.App = (function () {
       </div>
 
       <div class="drawer-sec">
-        <div class="drawer-sec-t"><span class="strong">故障原因落點</span> <span class="count-tag">${modelRecords.length} 筆</span></div>
+        <div class="drawer-sec-t"><span class="strong">故障原因落點</span> <span class="count-tag">${escapeHtml(scopeLabel)}</span> <span class="count-tag">${scopedRecords.length} 筆</span></div>
         <div class="model-fault-grid">
           ${reasonList('故障原因', reasons)}
           ${reasonList('故障內容', contents)}
@@ -4558,7 +4593,7 @@ window.App = (function () {
           <div class="barlist">
             ${shownParts.map(p => `
               <div class="barlist-row model-part-row" style="cursor:pointer" onclick="App.openPartDrawer('${escapeAttr(p.name)}')">
-                <div class="barlist-name" title="${escapeAttr(p.label || pdbLabel(p.name))}">${escapeHtml(p.label || pdbLabel(p.name))}</div>
+                <div class="barlist-name" title="${escapeHtml(p.label || pdbText(p.name))}">${p.labelHtml || escapeHtml(p.label || pdbText(p.name))}</div>
                 <div class="barlist-track"><div style="width:${(p.count / max * 100).toFixed(0)}%"></div></div>
                 <div class="barlist-n model-part-rate">
                   <span>${fmt.int(p.count)}</span>
@@ -4569,7 +4604,7 @@ window.App = (function () {
         </div>` : ''}
 
       <div class="drawer-sec">
-        <div class="drawer-sec-t"><span class="strong">最近維修紀錄</span> <span class="count-tag">${recentRecords.length} / ${modelRecords.length} 筆</span></div>
+        <div class="drawer-sec-t"><span class="strong">最近維修紀錄</span> <span class="count-tag">${escapeHtml(scopeLabel)}</span> <span class="count-tag">${recentRecords.length} / ${scopedRecords.length} 筆</span></div>
         <div class="model-record-list">
           ${recentRecords.length ? recentRecords.map(r => `
             <div class="model-record-row" onclick="App.openSerialDrawer('${escapeAttr(r.model)}','${escapeAttr(r.serial || '')}')">
@@ -4581,8 +4616,8 @@ window.App = (function () {
               <div class="model-record-main">${escapeHtml(r.content || r.reason || '未填故障內容')}</div>
               ${recordParts(r) ? `<div class="model-record-parts">${recordParts(r)}</div>` : ''}
             </div>
-          `).join('') : '<div class="empty"><div class="empty-t">目前這個型號在已匯入月份沒有維修紀錄</div></div>'}
-          ${modelRecords.length > recentRecords.length ? `<div class="model-record-more">還有 ${modelRecords.length - recentRecords.length} 筆，請用上方月份卡切換查看。</div>` : ''}
+          `).join('') : `<div class="empty"><div class="empty-t">${isAll ? '目前這個型號在已匯入月份沒有維修紀錄' : `${escapeHtml(scopeLabel)} 沒有這個型號的維修紀錄，可切換其他月份或「全部月份」`}</div></div>`}
+          ${scopedRecords.length > recentRecords.length ? `<div class="model-record-more">還有 ${scopedRecords.length - recentRecords.length} 筆，請用上方月份卡切換查看。</div>` : ''}
         </div>
       </div>
     `;
@@ -5150,7 +5185,7 @@ window.App = (function () {
   function openModelDrawer(model, focusMonth) {
     const cat = RepairParser.getCategory(model);
     const displaySubtitle = focusMonth === '__all__' ? ' · 累計' : (focusMonth ? ` · ${fmt.monthLabel(focusMonth)}` : '');
-    const subtitle = focusMonth ? ` · ${fmt.monthLabel(focusMonth)}` : '';
+    const subtitle = focusMonth === '__all__' ? ' · 全部月份' : focusMonth ? ` · ${fmt.monthLabel(focusMonth)}` : '';
     openDrawer({
       severity: 'info', icon: '#',
       overline: `只看這個型號 · ${cat}${subtitle}`,
@@ -6079,6 +6114,13 @@ window.App = (function () {
     return g ? `<span class="tag pdb-tag" title="料件群組（料件資料庫）">${escapeHtml(g)}</span>` : '';
   }
   // 報表顯示用：「品名（原文規格）」— 原文是純規格時換成人看得懂的品名
+  // 純文字版（給 title 屬性或需要再 escape 的地方用）；pdbLabel 回傳的是 HTML，不可再 escapeHtml
+  function pdbText(partText) {
+    const info = pdbInfoOf(partText);
+    const raw = String(partText || '');
+    if (!info || !info.name || info.name.trim().toUpperCase() === raw.trim().toUpperCase()) return raw;
+    return `${info.name} (${raw})`;
+  }
   function pdbLabel(partText) {
     const info = pdbInfoOf(partText);
     const raw = String(partText || '');
@@ -6166,7 +6208,7 @@ window.App = (function () {
   }
   // 取得合併後主檔（發布用）
   function pdbMergedMaster() { return pdbRows(); }
-  window.PartsDB = { groupOf: pdbGroupOf, infoOf: pdbInfoOf, tag: pdbTag, label: pdbLabel };
+  window.PartsDB = { groupOf: pdbGroupOf, infoOf: pdbInfoOf, tag: pdbTag, label: pdbLabel, text: pdbText };
 
   // ─────────────── Init ───────────────
   // syncCloudPromise 讓登入流程等待雲端資料就緒，避免快速登入時讀到空 DB
@@ -6235,7 +6277,7 @@ window.App = (function () {
     pdbSearch: pdbSearchRender, pdbOpenEdit, pdbCloseEdit, pdbSaveEdit, pdbDelete,
     setTrendCommonOnly,
     refreshSource, setPeriod,
-    setMonth, setMonthDirect, setCategory, setModel, quickModelSearch, quickModelSearchInput,
+    setMonth, setMonthDirect, setCategory, setModel, quickModelSearch, quickModelSearchInput, setModelQueryMonth,
     setAnalysisRole, setSummaryFocus,
     openCapaForm, saveCapaForm, setCapaStatus, deleteCapa,
     openCostConfig, saveCostConfig, quickEstimateCost,

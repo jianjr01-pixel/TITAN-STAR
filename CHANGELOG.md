@@ -4,6 +4,11 @@
 
 ## 版本歷史
 
+- `20261001-2` 型號分析視窗修正與月份篩選（Claude）：
+  - 修正型號分析視窗按 ✕／點遮罩／Esc 後仍殘留在畫面上：置中版型的關閉狀態仍落在可視範圍，改為關閉時 `opacity:0`、`visibility:hidden`。
+  - 修正零件名稱顯示成 `<span class="pdb-spec">…</span>` 原始碼：`pdbLabel()` 回傳 HTML 卻又被 `escapeHtml` 一次。新增純文字版 `pdbText()` 給 title 屬性使用。
+  - 頂部「型號查詢」新增月份下拉（最新月份／各月份／全部月份累計），查詢時套用該月份；查詢中切換月份會直接重查。原本固定只看最新月份。
+  - 型號分析視窗的「故障原因落點」與「最近維修紀錄」改為跟著目前月份（原本固定用全部月份，和零件區塊口徑不一致）。月份列新增「全部月份」分頁。
 - `20261001-1` 搬遷到新倉庫（Claude）：正式倉庫由 `Campcool/TITAN-STAR` 改為 `jianjr01-pixel/TITAN-STAR`，網站改為 `https://jianjr01-pixel.github.io/TITAN-STAR/`。
   - `monthly-source.js` 改到新倉庫的 `date/` 讀取每月 Excel。
   - Worker 的 `ALLOWED_ORIGIN`、`GITHUB_OWNER` 改為新帳號。
