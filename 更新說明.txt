@@ -1,0 +1,24 @@
+TITAN-STAR 20261002-1 更新步驟（月份 Ctrl 複選＋帳號權限群組）
+
+【A. 更新網站檔案】
+1. 把這個資料夾裡的所有檔案（含 tests、worker 子資料夾）複製到 C:\GitHub\TITAN-STAR，
+   資料夾結構相同，遇到同名檔選「取代」。
+   ※ 這裡面沒有 auth-config.js 和 worker\wrangler.jsonc，請保留你自己的那兩個檔案，不要動。
+
+【B. 升級登入服務（必做，否則新權限功能無法使用）】
+2. 開 PowerShell：
+   cd C:\GitHub\TITAN-STAR\worker
+   npm.cmd run db:migrate        ← 問 Ok to proceed? 按 y
+   npm.cmd run deploy
+
+【C. 重建離線單檔並上傳】
+3. cd C:\GitHub\TITAN-STAR
+   node build.js
+4. GitHub Desktop 應出現 12 個變更（新增 worker/migrations/0003_permissions.sql）。
+   Summary 填：20261002-1 月份複選與帳號權限群組
+   Commit to main → Push origin
+5. Actions 兩個綠燈後，網頁按 Ctrl+F5，重新登入。
+
+【D. 設定同事權限】
+6. 後台管理 → 帳號列表，每個帳號右邊有權限下拉，改成需要的群組。
+   升級後原本的一般使用者預設都是「瀏覽權限」。

@@ -743,6 +743,14 @@ button, input, select { font-family: inherit; }
   letter-spacing: .12em; text-transform: uppercase; font-weight: 600;
   min-width: 64px;
 }
+.sb-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-11, 11px); font-weight: 500;
+  letter-spacing: 0; color: var(--text-mute, var(--text3));
+  white-space: nowrap;
+}
+@media (hover: none) { .sb-hint { display: none; } }
 .model-lookup-row { flex-wrap: nowrap; }
 .model-lookup-input {
   width: min(560px, 100%);
@@ -2313,6 +2321,30 @@ button, input, select { font-family: inherit; }
   .ap-tag.must-change { background: var(--surface3); }
 }
 .ap-user-actions { display: flex; gap: var(--space-8); }
+/* 權限群組 */
+.ap-add-row { flex-wrap: wrap; }
+.ap-user-acts { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+.ap-me { color: var(--text3); font-weight: 500; }
+.ap-perm-select {
+  height: 34px; padding: 0 var(--space-10);
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border2, var(--border)); border-radius: var(--radius-8);
+  font: inherit; font-size: var(--fs-13-5); cursor: pointer;
+}
+.ap-perm-tag {
+  display: inline-block; font-size: var(--fs-12); font-weight: 700;
+  padding: var(--space-2) var(--space-8); border-radius: var(--radius-10);
+  background: var(--surface3); color: var(--text2); white-space: nowrap;
+}
+.ap-perm-tag.perm-admin { background: rgba(56,189,248,.16); color: var(--accent); }
+.ap-perm-tag.perm-uploader { background: rgba(16,185,129,.16); color: var(--ok); }
+.ap-perm-tag.perm-viewer { background: var(--surface3); color: var(--text3); }
+.ap-perm-legend {
+  display: flex; flex-wrap: wrap; gap: var(--space-6) var(--space-16);
+  margin: var(--space-4) 0 var(--space-8);
+  font-size: var(--fs-12-5); color: var(--text3);
+}
+.ap-perm-legend span { display: inline-flex; align-items: center; gap: var(--space-6); }
 .ap-note {
   margin-top: var(--space-20); padding: var(--space-12) var(--space-14);
   background: var(--surface2); border-radius: var(--radius-10);

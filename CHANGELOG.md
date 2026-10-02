@@ -4,6 +4,12 @@
 
 ## 版本歷史
 
+- `20261002-1` 月份複選與帳號權限群組（Claude）：
+  - 月份按鈕：一般點選改為「只看該月份」；Ctrl（Mac 為 ⌘）＋點選可加入或移除月份（複選），複選時篩選列保持展開。分析期間標題遇到不連續月份時逐一列出（例如 115/03、115/05），不再顯示成區間。
+  - 帳號權限分為三群組：管理權限（新增使用者、設定權限、上傳報表）、更新報表權限（上傳報表、瀏覽）、瀏覽權限（僅瀏覽）。可設定多位管理員，但至少保留一位。管理員不能改自己的權限。
+  - Worker 新增 `migrations/0003_permissions.sql`（只新增 `can_upload` 欄位）、`POST /api/admin/users/:id/permission`、`POST /api/upload`（更新報表權限即可上傳；舊路徑 `/api/admin/upload` 保留）。變更權限會讓對方重新登入。
+  - 前端後台：新增帳號時選擇權限群組，帳號列表可直接切換權限。更新報表權限的帳號在頂部顯示「⤒ 上傳報表」，只能看到上傳區塊。
+  - **需要重新部署 Worker**：在 `worker` 資料夾執行 `npm run db:migrate` 再 `npm run deploy`。
 - `20261001-2` 型號分析視窗修正與月份篩選（Claude）：
   - 修正型號分析視窗按 ✕／點遮罩／Esc 後仍殘留在畫面上：置中版型的關閉狀態仍落在可視範圍，改為關閉時 `opacity:0`、`visibility:hidden`。
   - 修正零件名稱顯示成 `<span class="pdb-spec">…</span>` 原始碼：`pdbLabel()` 回傳 HTML 卻又被 `escapeHtml` 一次。新增純文字版 `pdbText()` 給 title 屬性使用。

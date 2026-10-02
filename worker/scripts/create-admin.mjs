@@ -18,7 +18,7 @@ if (!validUsername(username) || !validPassword(password)) {
 const salt = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
 const hash = await passwordHash(password, salt);
 const q = s => `'${String(s).replace(/'/g, "''")}'`;
-const sql = `INSERT INTO users (username,display_name,password_hash,password_salt,role,must_change_password) VALUES (${q(username)},${q(displayName)},${q(hash)},${q(salt)},'admin',1);`;
+const sql = `INSERT INTO users (username,display_name,password_hash,password_salt,role,can_upload,must_change_password) VALUES (${q(username)},${q(displayName)},${q(hash)},${q(salt)},'admin',1,1);`;
 if (outArg) {
   const file = outArg.slice(6);
   fs.writeFileSync(file, sql + '\n', 'utf8');

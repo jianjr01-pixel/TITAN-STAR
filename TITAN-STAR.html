@@ -760,6 +760,14 @@ button, input, select { font-family: inherit; }
   letter-spacing: .12em; text-transform: uppercase; font-weight: 600;
   min-width: 64px;
 }
+.sb-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-11, 11px); font-weight: 500;
+  letter-spacing: 0; color: var(--text-mute, var(--text3));
+  white-space: nowrap;
+}
+@media (hover: none) { .sb-hint { display: none; } }
 .model-lookup-row { flex-wrap: nowrap; }
 .model-lookup-input {
   width: min(560px, 100%);
@@ -2330,6 +2338,30 @@ button, input, select { font-family: inherit; }
   .ap-tag.must-change { background: var(--surface3); }
 }
 .ap-user-actions { display: flex; gap: var(--space-8); }
+/* 權限群組 */
+.ap-add-row { flex-wrap: wrap; }
+.ap-user-acts { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+.ap-me { color: var(--text3); font-weight: 500; }
+.ap-perm-select {
+  height: 34px; padding: 0 var(--space-10);
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border2, var(--border)); border-radius: var(--radius-8);
+  font: inherit; font-size: var(--fs-13-5); cursor: pointer;
+}
+.ap-perm-tag {
+  display: inline-block; font-size: var(--fs-12); font-weight: 700;
+  padding: var(--space-2) var(--space-8); border-radius: var(--radius-10);
+  background: var(--surface3); color: var(--text2); white-space: nowrap;
+}
+.ap-perm-tag.perm-admin { background: rgba(56,189,248,.16); color: var(--accent); }
+.ap-perm-tag.perm-uploader { background: rgba(16,185,129,.16); color: var(--ok); }
+.ap-perm-tag.perm-viewer { background: var(--surface3); color: var(--text3); }
+.ap-perm-legend {
+  display: flex; flex-wrap: wrap; gap: var(--space-6) var(--space-16);
+  margin: var(--space-4) 0 var(--space-8);
+  font-size: var(--fs-12-5); color: var(--text3);
+}
+.ap-perm-legend span { display: inline-flex; align-items: center; gap: var(--space-6); }
 .ap-note {
   margin-top: var(--space-20); padding: var(--space-12) var(--space-14);
   background: var(--surface2); border-radius: var(--radius-10);
@@ -5841,7 +5873,8 @@ body {
       <button class="btn theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="切換色系">🌙</button>
     </div>
     <button class="btn" id="changeOwnPasswordBtn" style="display:none" onclick="Auth.openChangePassword()">修改密碼</button>
-    <button class="btn" id="adminPanelBtn" style="display:none" onclick="Auth.openAdminPanel()" title="帳號、登入紀錄與 Excel 管理">⚙ 後台管理</button>
+    <button class="btn" id="adminPanelBtn" style="display:none" onclick="Auth.openAdminPanel()" title="帳號、權限、登入紀錄與 Excel 管理">⚙ 後台管理</button>
+    <button class="btn" id="reportUploadBtn" style="display:none" onclick="Auth.openAdminPanel()" title="上傳每月維修報表 Excel">⤒ 上傳報表</button>
     <button class="btn" id="logoutBtn" style="display:none" onclick="Auth.logout()" title="登出並清除此分頁的登入狀態">登出</button>
   </div>
 </div>
@@ -9805,7 +9838,11 @@ window.App = (function () {
     el.hidden = false;
     const prev = RepairMonthlySource.calendarPrevious(latest);
     const selected = state.selectedMonths.length ? state.selectedMonths.slice().sort() : months;
-    const selectedLabel = selected.length === 1 ? fmt.monthLabel(selected[0]) : fmt.monthLabel(selected[0]) + ' – ' + fmt.monthLabel(selected[selected.length - 1]);
+    // 連續月份顯示「起 – 迄」；Ctrl 複選出不連續的月份時逐一列出，避免看起來像整段區間
+    const contiguous = selected.every((m, i) => i === 0 || RepairMonthlySource.calendarPrevious(m) === selected[i - 1]);
+    const selectedLabel = selected.length === 1 ? fmt.monthLabel(selected[0])
+      : contiguous ? fmt.monthLabel(selected[0]) + ' – ' + fmt.monthLabel(selected[selected.length - 1])
+      : selected.map(fmt.monthLabel).join('、');
     const gaps = [];
     for (let m = latest; m >= months[0]; m = RepairMonthlySource.calendarPrevious(m)) if (!months.includes(m)) gaps.push(fmt.monthLabel(m));
     $('monthlyContextTitle').textContent = '分析期間 ' + selectedLabel;
@@ -10205,13 +10242,13 @@ window.App = (function () {
 
     // Month chips（維修件數 + 整新數）
     const mc = $('monthChips');
-    mc.innerHTML = '<div class="sb-label">月份</div>'
+    mc.innerHTML = '<div class="sb-label" title="點選＝只看該月份；Ctrl（Mac 為 ⌘）＋點選＝加入或移除該月份">月份<small class="sb-hint">Ctrl＋點選可複選</small></div>'
       + `<button class="chip ${all ? 'active' : ''}" onclick="App.setMonth('__ALL__')">全部月份 <span class="num">${months.length} 個月</span>${allDenom ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(allDenom)} 台</span>` : ''}</button>`
       + months.map(mk => {
         const sel = !all && state.selectedMonths.includes(mk);
         const m = state.db.months[mk];
         const den = monthDenom[mk];
-        return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setMonth('${mk}')">${fmt.monthLabel(mk)} <span class="num">RMA 返維修課 ${fmt.int(m.records.length)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
+        return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setMonth('${mk}', event.ctrlKey || event.metaKey)" title="點選＝只看 ${fmt.monthLabel(mk)}；Ctrl＋點選＝加入／移除">${fmt.monthLabel(mk)} <span class="num">RMA 返維修課 ${fmt.int(m.records.length)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
       }).join('');
 
     // Mobile month select（完整標示維修筆數；窄螢幕由 CSS 改為上下排列）
@@ -10332,24 +10369,28 @@ window.App = (function () {
     }
   }
 
-  function setMonth(mk) {
+  // 月份選擇：一般點選＝只看該月份；Ctrl／⌘＋點選＝把該月份加入或移出目前的選擇（複選）
+  function setMonth(mk, additive = false) {
     const allMonths = Object.keys(state.db.months).sort();
     if (mk === '__ALL__') {
       state.selectedMonths = allMonths.slice();
+    } else if (!additive) {
+      state.selectedMonths = [mk];
     } else {
-      const all = state.selectedMonths.length === allMonths.length;
+      const all = state.selectedMonths.length === 0 || state.selectedMonths.length === allMonths.length;
       if (all) {
-        state.selectedMonths = [mk];
+        state.selectedMonths = [mk];   // 從「全部月份」開始複選：先只留這個月
       } else if (state.selectedMonths.includes(mk)) {
         state.selectedMonths = state.selectedMonths.filter(m => m !== mk);
         if (state.selectedMonths.length === 0) state.selectedMonths = allMonths.slice();
       } else {
-        state.selectedMonths.push(mk);
+        state.selectedMonths = [...state.selectedMonths, mk].sort();
       }
     }
     renderAll();
     saveFilterState();
-    collapseSubbar();
+    // 複選時保持篩選列展開，方便繼續點選其他月份
+    if (!additive) collapseSubbar();
   }
   function setMonthDirect(mk) {
     const allMonths = Object.keys(state.db.months).sort();
@@ -15893,21 +15934,35 @@ window.Auth = (function () {
     if (cancel) cancel.style.display = forced ? 'none' : '';
     setTimeout(() => $('cpOld').focus(), 100);
   }
+  // 權限群組：Worker 回傳 permission；舊版 Worker 只有 role，依 role 推回
+  const PERM_LABEL = { admin: '管理權限', uploader: '更新報表權限', viewer: '瀏覽權限' };
+  const PERM_DESC = {
+    admin: '可新增使用者、設定權限、上傳報表',
+    uploader: '可上傳報表、瀏覽分析資料',
+    viewer: '僅可瀏覽分析資料',
+  };
+  function permOf(user) {
+    if (!user) return 'viewer';
+    if (PERM_LABEL[user.permission]) return user.permission;
+    return user.role === 'admin' ? 'admin' : 'viewer';
+  }
+  function currentUser() { const s = session(); return (s && s.user) || null; }
   function avatarHtml(user) {
     const uid = String(user.username || '');
     const name = String(user.displayName || '');
     let h = 0;
     for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) & 0xFFFF;
-    const label = name ? `${name}（${uid}）` : uid;
+    const label = (name ? `${name}（${uid}）` : uid) + ` · ${PERM_LABEL[permOf(user)]}`;
     return `<span class="user-avatar" style="background:hsl(${h % 360},55%,52%)" title="${esc(label)}">${esc((name || uid).charAt(0))}</span>`;
   }
   async function showMain(user) {
     $('loginScreen').style.display = 'none';
     $('changePwScreen').style.display = 'none';
-    sessionStorage.setItem('titan_session', JSON.stringify({ username: user.username, isAdmin: user.role === 'admin' }));
+    const perm = permOf(user);
+    sessionStorage.setItem('titan_session', JSON.stringify({ username: user.username, isAdmin: perm === 'admin', canUpload: perm !== 'viewer', permission: perm }));
     const userEl = $('modeBarUser');
     if (userEl) userEl.innerHTML = avatarHtml(user);
-    for (const [id, show] of [['adminPanelBtn', user.role === 'admin'], ['changeOwnPasswordBtn', true], ['logoutBtn', true]]) {
+    for (const [id, show] of [['adminPanelBtn', perm === 'admin'], ['reportUploadBtn', perm === 'uploader'], ['changeOwnPasswordBtn', true], ['logoutBtn', true]]) {
       const el = $(id); if (el) el.style.display = show ? '' : 'none';
     }
     UI().initKeyboardShortcuts?.();
@@ -15962,7 +16017,7 @@ window.Auth = (function () {
     try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
     clear();
     const userEl = $('modeBarUser'); if (userEl) userEl.textContent = '';
-    for (const id of ['adminPanelBtn', 'changeOwnPasswordBtn', 'logoutBtn']) { const el = $(id); if (el) el.style.display = 'none'; }
+    for (const id of ['adminPanelBtn', 'reportUploadBtn', 'changeOwnPasswordBtn', 'logoutBtn']) { const el = $(id); if (el) el.style.display = 'none'; }
     showLogin();
   }
 
@@ -15970,21 +16025,36 @@ window.Auth = (function () {
   const EVENT_LABEL = {
     login: '登入', login_failed: '登入失敗', login_locked: '登入暫停（失敗過多）', password_changed: '修改密碼',
     account_created: '新增帳號', account_deleted: '刪除帳號', password_reset: '重設密碼', excel_uploaded: '上傳 Excel',
+    permission_changed: '變更權限',
   };
   function eventText(event) {
     const [type, ...rest] = String(event || '').split(':');
     return (EVENT_LABEL[type] || type) + (rest.length ? `：${rest.join(':')}` : '');
   }
+  function permOptions(selected) {
+    return Object.keys(PERM_LABEL).map(p => `<option value="${p}" ${p === selected ? 'selected' : ''}>${PERM_LABEL[p]}</option>`).join('');
+  }
   async function renderAdmin() {
     const [u, l] = await Promise.all([api('/api/admin/users'), api('/api/admin/login-logs')]);
-    $('userListEl').innerHTML = u.users.map(x => `
-      <div class="ap-user-row">
-        <span>${esc(x.username)} ${esc(x.displayName || '')} · ${x.role === 'admin' ? '管理員' : '使用者'}${x.mustChangePassword ? ' · 待改密' : ''}</span>
-        ${x.role === 'user' ? `<span>
-          <button class="btn" data-act="reset" data-id="${Number(x.id)}" data-name="${esc(x.username)}">重設密碼</button>
-          <button class="btn danger" data-act="delete" data-id="${Number(x.id)}" data-name="${esc(x.username)}">刪除</button>
-        </span>` : ''}
-      </div>`).join('') || '<div class="ap-note">尚無帳號</div>';
+    const me = currentUser();
+    const adminCount = u.users.filter(x => permOf(x) === 'admin' && x.active !== false).length;
+    $('userListEl').innerHTML = u.users.map(x => {
+      const perm = permOf(x);
+      const isMe = me && Number(me.id) === Number(x.id);
+      const lastAdmin = perm === 'admin' && adminCount <= 1;
+      return `
+      <div class="ap-user-row ${perm === 'admin' ? 'is-admin' : ''}">
+        <span class="ap-user-info">${esc(x.username)} ${esc(x.displayName || '')}${isMe ? ' <small class="ap-me">（你）</small>' : ''}${x.mustChangePassword ? ' · 待改密' : ''}</span>
+        <span class="ap-user-acts">
+          ${isMe || lastAdmin
+            ? `<span class="ap-perm-tag perm-${perm}" title="${esc(isMe ? '不可變更自己的權限' : '至少要保留一位管理權限帳號')}">${PERM_LABEL[perm]}</span>`
+            : `<select class="ap-perm-select" data-act="perm" data-id="${Number(x.id)}" data-name="${esc(x.username)}" data-prev="${perm}" aria-label="${esc(x.username)} 的權限群組">${permOptions(perm)}</select>`}
+          ${isMe ? '' : `
+            <button class="btn" data-act="reset" data-id="${Number(x.id)}" data-name="${esc(x.username)}">重設密碼</button>
+            ${lastAdmin ? '' : `<button class="btn danger" data-act="delete" data-id="${Number(x.id)}" data-name="${esc(x.username)}">刪除</button>`}`}
+        </span>
+      </div>`;
+    }).join('') || '<div class="ap-note">尚無帳號</div>';
     $('loginLogEl').innerHTML = l.logs.map(x =>
       `<div>${esc(x.created_at)} · ${esc(x.username)} · ${esc(eventText(x.event))} · ${x.success ? '成功' : '失敗'}</div>`
     ).join('') || '<div class="ap-note">尚無紀錄</div>';
@@ -15999,11 +16069,38 @@ window.Auth = (function () {
       const id = Number(btn.dataset.id), name = btn.dataset.name;
       if (btn.dataset.act === 'reset') resetUserPwd(id, name); else deleteUser(id, name);
     });
+    list.addEventListener('change', e => {
+      const sel = e.target.closest('select[data-act="perm"]');
+      if (sel) setUserPermission(Number(sel.dataset.id), sel.dataset.name, sel.value, sel);
+    });
+  }
+  // 管理權限看到完整後台；更新報表權限只看到「上傳每月 Excel」
+  function setPanelMode(mode) {
+    const panel = $('adminPanel');
+    if (!panel) return;
+    panel.dataset.mode = mode;
+    panel.querySelectorAll('[data-admin-only]').forEach(el => { el.style.display = mode === 'admin' ? '' : 'none'; });
+    const title = $('adminPanelTitle');
+    if (title) title.textContent = mode === 'admin' ? '⚙ 帳號管理' : '⤒ 上傳每月報表';
   }
   async function openAdminPanel() {
+    const perm = permOf(currentUser());
+    if (perm === 'viewer') { alert('目前帳號為瀏覽權限，無法使用後台'); return; }
     $('adminPanel').style.display = 'flex';
+    setPanelMode(perm === 'admin' ? 'admin' : 'upload');
+    if (perm !== 'admin') return;
     bindAdminList();
     try { await renderAdmin(); } catch (e) { alert(e.message); }
+  }
+  async function setUserPermission(id, name, permission, sel) {
+    if (!confirm(`確定把「${name}」改為「${PERM_LABEL[permission]}」？\n${PERM_DESC[permission]}。\n對方需要重新登入才會套用。`)) {
+      if (sel) sel.value = sel.dataset.prev;
+      return;
+    }
+    try {
+      await api(`/api/admin/users/${Number(id)}/permission`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permission }) });
+      await renderAdmin();
+    } catch (e) { alert(e.message); if (sel) sel.value = sel.dataset.prev; }
   }
   function closeAdminPanel() { $('adminPanel').style.display = 'none'; }
   async function addUser() {
@@ -16011,8 +16108,10 @@ window.Auth = (function () {
     try {
       await api('/api/admin/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
         username: $('newUserInput').value.trim(), displayName: $('newNameInput').value.trim(), temporaryPassword: $('newTempPassword').value,
+        permission: ($('newUserPermission') && $('newUserPermission').value) || 'viewer',
       }) });
       for (const id of ['newUserInput', 'newNameInput', 'newTempPassword']) $(id).value = '';
+      if ($('newUserPermission')) $('newUserPermission').value = 'viewer';
       await renderAdmin();
     } catch (e) { err.textContent = e.message; }
   }
@@ -16033,7 +16132,11 @@ window.Auth = (function () {
     const info = window.RepairMonthlySource?.monthInfo;
     if (info) { try { info(file.name); } catch (e) { alert(e.message); input.value = ''; return; } }
     const form = new FormData(); form.append('file', file);
-    try { await api('/api/admin/upload', { method: 'POST', body: form }); alert(`「${file.name}」已上傳至 date 資料夾。稍候按「檢查更新」即可看到新資料。`); await renderAdmin(); }
+    try {
+      await api('/api/upload', { method: 'POST', body: form });
+      alert(`「${file.name}」已上傳至 date 資料夾。稍候按「檢查更新」即可看到新資料。`);
+      if (permOf(currentUser()) === 'admin') await renderAdmin();
+    }
     catch (e) { alert(e.message); }
     finally { input.value = ''; }
   }
@@ -16041,7 +16144,8 @@ window.Auth = (function () {
   return {
     boot, doLogin, doChangePw, logout, cancelChangePassword,
     openChangePassword: () => showChangePw(false),
-    openAdminPanel, closeAdminPanel, addUser, resetUserPwd, deleteUser, uploadExcel,
+    openAdminPanel, closeAdminPanel, addUser, resetUserPwd, deleteUser, uploadExcel, setUserPermission,
+    permission: () => permOf(currentUser()),
     // app.js 仍會呼叫的共用功能，轉交給 TitanUI
     requestNotificationPermission: (...a) => UI().requestNotificationPermission?.(...a) || Promise.resolve(),
     notifyNewAnomalies: (...a) => UI().notifyNewAnomalies?.(...a),
@@ -18303,10 +18407,11 @@ async function onAuthSuccess() {
 <div id="adminPanel" class="ap-overlay" style="display:none" onclick="if(event.target===this)Auth.closeAdminPanel()">
   <div class="ap-box">
     <div class="ap-hdr">
-      <div class="ap-title">⚙ 帳號管理</div>
+      <div class="ap-title" id="adminPanelTitle">⚙ 帳號管理</div>
       <button class="ap-close" onclick="Auth.closeAdminPanel()">✕</button>
     </div>
     <div class="ap-body">
+      <div data-admin-only>
       <!-- Add user -->
       <div class="ap-sec-t">新增帳號</div>
       <div class="ap-add-row">
@@ -18317,21 +18422,34 @@ async function onAuthSuccess() {
           onkeydown="if(event.key==='Enter')Auth.addUser()"
           style="flex:1">
         <input class="ls-input" type="password" id="newTempPassword" placeholder="暫時密碼（至少10碼）" style="flex:1">
+        <select class="ls-input ap-perm-select" id="newUserPermission" aria-label="新帳號的權限群組" style="flex:0 0 150px">
+          <option value="viewer" selected>瀏覽權限</option>
+          <option value="uploader">更新報表權限</option>
+          <option value="admin">管理權限</option>
+        </select>
         <button class="btn primary" onclick="Auth.addUser()">新增</button>
+      </div>
+      <div class="ap-perm-legend">
+        <span><b class="ap-perm-tag perm-admin">管理權限</b>新增使用者、設定權限、上傳報表</span>
+        <span><b class="ap-perm-tag perm-uploader">更新報表權限</b>上傳報表、瀏覽分析資料</span>
+        <span><b class="ap-perm-tag perm-viewer">瀏覽權限</b>僅可瀏覽分析資料</span>
       </div>
       <div class="ls-err" id="addUserErr" style="margin-bottom:8px"></div>
       <!-- User list -->
       <div class="ap-sec-t" style="margin-top:18px">帳號列表</div>
       <div id="userListEl" class="ap-user-list"></div>
-      <div class="ap-note">新帳號與重設密碼由 Cloudflare Worker 保存；使用者下次登入必須先修改暫時密碼。</div>
+      <div class="ap-note">新帳號與重設密碼由 Cloudflare Worker 保存；使用者下次登入必須先修改暫時密碼。變更權限後，對方需重新登入才會套用。可設定多位管理權限帳號，但至少要保留一位。</div>
+      </div>
       <div class="ap-sec-t" style="margin-top:18px">上傳每月 Excel</div>
       <input type="file" id="adminUploadInput" accept=".xlsx" onchange="Auth.uploadExcel(this)">
       <div class="ap-note">檔名須符合 date 資料夾規則；後台會安全提交至 GitHub。</div>
       <!-- Login log -->
+      <div data-admin-only>
       <div class="ap-sec-t" style="margin-top:24px;display:flex;align-items:center;justify-content:space-between">
         <span>登入與操作紀錄（伺服器，最新 200 筆，不可刪除）</span>
       </div>
       <div id="loginLogEl" style="max-height:220px;overflow-y:auto;padding:4px 0"></div>
+      </div>
     </div>
   </div>
 </div>

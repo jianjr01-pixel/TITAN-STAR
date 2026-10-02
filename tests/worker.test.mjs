@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
-import worker, { passwordHash, PBKDF2_ITERATIONS } from '../worker/src/index.js';
+import worker, { passwordHash, PBKDF2_ITERATIONS, permissionOf } from '../worker/src/index.js';
 import { uploadFileInfo } from '../worker/src/filename.js';
 
 const require = createRequire(import.meta.url);
@@ -122,6 +122,79 @@ test('管理員操作寫入紀錄，上傳接受標準檔名並拒絕非 xlsx �
   assert.ok(puts[0].endsWith('/contents/date/115年 08 月維修報表.xlsx'));
   const events = db.raw.prepare('SELECT event FROM login_logs WHERE success=1').all().map(r => r.event.split(':')[0]);
   for (const ev of ['account_created', 'password_reset', 'account_deleted', 'excel_uploaded']) assert.ok(events.includes(ev), ev);
+});
+
+test('權限群組：建立、上傳權限、變更權限與保留最後一位管理員', async () => {
+  const db = d1(); const e = env(db);
+  await seedUser(db, 'boss01', 'BossPassword1', 'admin', 0);
+  const boss = await (await login(e, 'boss01', 'BossPassword1')).json();
+  assert.equal(boss.user.permission, 'admin');
+  const make = async (username, permission) => {
+    const r = await call(e, '/api/admin/users', { method: 'POST', token: boss.token, body: { username, temporaryPassword: 'TempPassword9', permission } });
+    assert.equal(r.status, 201, username);
+    db.raw.prepare('UPDATE users SET must_change_password=0 WHERE username=?').run(username);
+    return (await (await login(e, username, 'TempPassword9')).json());
+  };
+  assert.equal((await call(e, '/api/admin/users', { method: 'POST', token: boss.token, body: { username: 'bad01', temporaryPassword: 'TempPassword9', permission: 'root' } })).status, 400);
+  const up = await make('up01', 'uploader');
+  const view = await make('view01', 'viewer');
+  const adm2 = await make('adm02', 'admin');
+  assert.equal(up.user.permission, 'uploader');
+  assert.equal(up.user.canUpload, true);
+  assert.equal(view.user.permission, 'viewer');
+  assert.equal(adm2.user.permission, 'admin');
+  // 預設（沒帶 permission）為瀏覽權限
+  assert.equal((await call(e, '/api/admin/users', { method: 'POST', token: boss.token, body: { username: 'def01', temporaryPassword: 'TempPassword9' } })).status, 201);
+  assert.equal(db.raw.prepare("SELECT role,can_upload FROM users WHERE username='def01'").get().can_upload, 0);
+
+  // 更新報表權限不可進帳號管理；第二位管理員可以
+  assert.equal((await call(e, '/api/admin/users', { token: up.token })).status, 403);
+  assert.equal((await call(e, '/api/admin/users', { token: adm2.token })).status, 200);
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opt = {}) => opt.method === 'PUT'
+    ? new Response(JSON.stringify({ commit: { sha: 'abc' } }), { status: 201 })
+    : new Response('{}', { status: 404 });
+  const xlsx = new Uint8Array([0x50, 0x4b, 3, 4, 0, 0]);
+  const upload = (token, path = '/api/upload') => { const form = new FormData(); form.append('file', new File([xlsx], '115年 09 月維修報表.xlsx')); return call(e, path, { method: 'POST', token, form }); };
+  try {
+    assert.equal((await upload(up.token)).status, 200);
+    assert.equal((await upload(adm2.token)).status, 200);
+    assert.equal((await upload(view.token)).status, 403);
+    assert.equal((await upload(up.token, '/api/admin/upload')).status, 200); // 舊路徑仍可用
+  } finally { globalThis.fetch = realFetch; }
+
+  // 變更權限：踢出對方登入；不可改自己
+  const viewId = db.raw.prepare("SELECT id FROM users WHERE username='view01'").get().id;
+  assert.equal((await call(e, `/api/admin/users/${viewId}/permission`, { method: 'POST', token: boss.token, body: { permission: 'uploader' } })).status, 200);
+  assert.equal((await call(e, '/api/auth/me', { token: view.token })).status, 401);
+  const view2 = await (await login(e, 'view01', 'TempPassword9')).json();
+  assert.equal(view2.user.permission, 'uploader');
+  const bossId = db.raw.prepare("SELECT id FROM users WHERE username='boss01'").get().id;
+  assert.equal((await call(e, `/api/admin/users/${bossId}/permission`, { method: 'POST', token: boss.token, body: { permission: 'viewer' } })).status, 400);
+
+  // 兩位管理員時可降級其中一位；剩一位時不可再降級或刪除
+  const adm2Id = db.raw.prepare("SELECT id FROM users WHERE username='adm02'").get().id;
+  assert.equal((await call(e, `/api/admin/users/${bossId}/permission`, { method: 'POST', token: adm2.token, body: { permission: 'uploader' } })).status, 200);
+  assert.equal((await call(e, `/api/admin/users/${adm2Id}`, { method: 'DELETE', token: adm2.token })).status, 400);
+  db.raw.prepare("UPDATE users SET must_change_password=0 WHERE username='boss01'").run();
+  const bossNow = await (await login(e, 'boss01', 'BossPassword1')).json();
+  assert.equal(bossNow.user.permission, 'uploader');
+  assert.equal((await call(e, '/api/admin/users', { token: bossNow.token })).status, 403);
+  const events = db.raw.prepare('SELECT event FROM login_logs WHERE success=1').all().map(r => r.event.split(':')[0]);
+  assert.ok(events.includes('permission_changed'));
+});
+
+test('既有資料庫套用 0003 後：舊管理員可上傳、舊一般使用者為瀏覽權限', () => {
+  const db = new DatabaseSync(':memory:');
+  const files = fs.readdirSync('worker/migrations').sort();
+  for (const f of files.filter(f => f < '0003')) db.exec(fs.readFileSync(`worker/migrations/${f}`, 'utf8'));
+  db.exec("INSERT INTO users (username,password_hash,password_salt,role) VALUES ('a1','h','s','admin'),('u1','h','s','user')");
+  for (const f of files.filter(f => f >= '0003')) db.exec(fs.readFileSync(`worker/migrations/${f}`, 'utf8'));
+  const rows = Object.fromEntries(db.prepare('SELECT username,role,can_upload FROM users').all().map(r => [r.username, r]));
+  assert.equal(permissionOf(rows.a1), 'admin');
+  assert.equal(rows.a1.can_upload, 1);
+  assert.equal(permissionOf(rows.u1), 'viewer');
 });
 
 test('前端後台畫面會跳脫帳號與紀錄內容', () => {

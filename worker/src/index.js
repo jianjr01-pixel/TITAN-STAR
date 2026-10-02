@@ -75,13 +75,31 @@ async function actor(request, env) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
   const tokenHash = await sha256(token);
-  const row = await env.DB.prepare(`SELECT u.id,u.username,u.display_name,u.role,u.must_change_password,u.active FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`).bind(tokenHash, now()).first();
+  const row = await env.DB.prepare(`SELECT u.id,u.username,u.display_name,u.role,u.can_upload,u.must_change_password,u.active FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`).bind(tokenHash, now()).first();
   if (!row || !row.active) return null;
   await env.DB.prepare('UPDATE sessions SET last_seen_at=? WHERE token_hash=?').bind(now(), tokenHash).run();
   return row;
 }
-const requireAdmin = async (request, env) => { const user = await actor(request, env); return user?.role === 'admin' && !user.must_change_password ? user : null; };
-function publicUser(row) { return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, mustChangePassword: !!row.must_change_password, active: !!row.active }; }
+// 權限群組：admin＝管理權限（帳號管理＋上傳）、uploader＝更新報表權限（上傳＋瀏覽）、viewer＝瀏覽權限
+export const PERMISSIONS = ['admin', 'uploader', 'viewer'];
+export function permissionOf(row) {
+  if (!row) return 'viewer';
+  if (row.role === 'admin') return 'admin';
+  return row.can_upload ? 'uploader' : 'viewer';
+}
+const permissionColumns = p => p === 'admin' ? { role: 'admin', canUpload: 1 } : { role: 'user', canUpload: p === 'uploader' ? 1 : 0 };
+const PERMISSION_LABEL = { admin: '管理權限', uploader: '更新報表權限', viewer: '瀏覽權限' };
+const ready = user => user && !user.must_change_password ? user : null;
+const requireAdmin = async (request, env) => { const user = ready(await actor(request, env)); return user && permissionOf(user) === 'admin' ? user : null; };
+const requireUploader = async (request, env) => { const user = ready(await actor(request, env)); return user && permissionOf(user) !== 'viewer' ? user : null; };
+async function activeAdminCount(env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1").first();
+  return Number(row?.n || 0);
+}
+function publicUser(row) {
+  const permission = permissionOf(row);
+  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, permission, canUpload: permission !== 'viewer', mustChangePassword: !!row.must_change_password, active: !!row.active };
+}
 async function body(request) { try { return await request.json(); } catch { return {}; } }
 
 async function githubUpload(env, filename, bytes, message) {
@@ -150,22 +168,58 @@ async function handle(request, env, headers) {
     return json({ ok: true }, 200, headers);
   }
 
+  // 上傳每月 Excel：管理權限與更新報表權限都可以（/api/admin/upload 保留給舊版前端）
+  if ((path === '/api/upload' || path === '/api/admin/upload') && request.method === 'POST') {
+    const uploader = await requireUploader(request, env);
+    if (!uploader) return json({ error: '需要更新報表權限' }, 403, headers);
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!(file instanceof File) || !uploadFileInfo(file.name)) {
+      return json({ error: '檔名不符合 date 規則，例如「115年 08 月維修報表.xlsx」「115年8月整新故障.xlsx」「115年 08 月維修報表-更正版2.xlsx」' }, 400, headers);
+    }
+    if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) return json({ error: 'Excel 大小需在 25 MB 以內' }, 400, headers);
+    const bytes = await file.arrayBuffer();
+    const sig = new Uint8Array(bytes.slice(0, 4));
+    if (!(sig[0] === 0x50 && sig[1] === 0x4b)) return json({ error: '檔案內容不是 .xlsx 格式' }, 400, headers);
+    const result = await githubUpload(env, file.name, bytes, `TITAN-STAR: upload ${file.name}`);
+    await log(env, uploader.username, true, `excel_uploaded:${file.name}`, request, uploader.id);
+    return json({ ok: true, commit: result.commit?.sha || '' }, 200, headers);
+  }
   const admin = await requireAdmin(request, env);
-  if (!admin) return json({ error: '需要管理員權限' }, 403, headers);
+  if (!admin) return json({ error: '需要管理權限' }, 403, headers);
 
   if (path === '/api/admin/users' && request.method === 'GET') {
-    const rows = await env.DB.prepare('SELECT id,username,display_name,role,must_change_password,active,created_at,updated_at FROM users ORDER BY username').all();
+    const rows = await env.DB.prepare('SELECT id,username,display_name,role,can_upload,must_change_password,active,created_at,updated_at FROM users ORDER BY username').all();
     return json({ users: rows.results.map(publicUser) }, 200, headers);
   }
   if (path === '/api/admin/users' && request.method === 'POST') {
-    const { username, displayName = '', temporaryPassword } = await body(request);
+    const { username, displayName = '', temporaryPassword, permission = 'viewer' } = await body(request);
     if (!validUsername(username) || !validPassword(temporaryPassword)) return json({ error: '帳號需 3–64 碼英數字（可含 _ . -），暫時密碼至少 10 碼' }, 400, headers);
+    if (!PERMISSIONS.includes(permission)) return json({ error: '權限群組不正確' }, 400, headers);
     const exists = await env.DB.prepare('SELECT id FROM users WHERE username=?').bind(username).first();
     if (exists) return json({ error: '帳號已存在' }, 409, headers);
     const hashed = await newPassword(temporaryPassword);
-    await env.DB.prepare('INSERT INTO users (username,display_name,password_hash,password_salt,role,must_change_password) VALUES (?,?,?,?,?,1)').bind(username, cleanText(displayName, 40), hashed.hash, hashed.salt, 'user').run();
-    await log(env, admin.username, true, `account_created:${username}`, request, admin.id);
+    const cols = permissionColumns(permission);
+    await env.DB.prepare('INSERT INTO users (username,display_name,password_hash,password_salt,role,can_upload,must_change_password) VALUES (?,?,?,?,?,?,1)').bind(username, cleanText(displayName, 40), hashed.hash, hashed.salt, cols.role, cols.canUpload).run();
+    await log(env, admin.username, true, `account_created:${username}（${PERMISSION_LABEL[permission]}）`, request, admin.id);
     return json({ ok: true }, 201, headers);
+  }
+  const perm = path.match(/^\/api\/admin\/users\/(\d+)\/permission$/);
+  if (perm && request.method === 'POST') {
+    const { permission } = await body(request);
+    if (!PERMISSIONS.includes(permission)) return json({ error: '權限群組不正確' }, 400, headers);
+    if (Number(perm[1]) === admin.id) return json({ error: '不可變更自己的權限，請由其他管理員操作' }, 400, headers);
+    const target = await env.DB.prepare('SELECT id,username,role,can_upload,active FROM users WHERE id=?').bind(perm[1]).first();
+    if (!target) return json({ error: '找不到帳號' }, 404, headers);
+    if (target.role === 'admin' && permission !== 'admin' && target.active && await activeAdminCount(env) <= 1) {
+      return json({ error: '至少要保留一位管理權限帳號' }, 400, headers);
+    }
+    const cols = permissionColumns(permission);
+    await env.DB.prepare('UPDATE users SET role=?,can_upload=?,updated_at=? WHERE id=?').bind(cols.role, cols.canUpload, now(), target.id).run();
+    // 權限調整後強制重新登入，讓畫面上的按鈕立即依新權限顯示
+    await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(target.id).run();
+    await log(env, admin.username, true, `permission_changed:${target.username}→${PERMISSION_LABEL[permission]}`, request, admin.id);
+    return json({ ok: true }, 200, headers);
   }
   const reset = path.match(/^\/api\/admin\/users\/(\d+)\/reset$/);
   if (reset && request.method === 'POST') {
@@ -181,9 +235,10 @@ async function handle(request, env, headers) {
   }
   const remove = path.match(/^\/api\/admin\/users\/(\d+)$/);
   if (remove && request.method === 'DELETE') {
-    if (Number(remove[1]) === admin.id) return json({ error: '不可刪除目前管理員' }, 400, headers);
-    const target = await env.DB.prepare('SELECT id,username FROM users WHERE id=?').bind(remove[1]).first();
+    if (Number(remove[1]) === admin.id) return json({ error: '不可刪除自己的帳號' }, 400, headers);
+    const target = await env.DB.prepare('SELECT id,username,role,active FROM users WHERE id=?').bind(remove[1]).first();
     if (!target) return json({ error: '找不到帳號' }, 404, headers);
+    if (target.role === 'admin' && target.active && await activeAdminCount(env) <= 1) return json({ error: '至少要保留一位管理權限帳號' }, 400, headers);
     await env.DB.prepare('DELETE FROM users WHERE id=?').bind(target.id).run();
     await log(env, admin.username, true, `account_deleted:${target.username}`, request, admin.id);
     return json({ ok: true }, 200, headers);
@@ -191,20 +246,6 @@ async function handle(request, env, headers) {
   if (path === '/api/admin/login-logs' && request.method === 'GET') {
     const rows = await env.DB.prepare('SELECT username,success,event,created_at FROM login_logs ORDER BY id DESC LIMIT 200').all();
     return json({ logs: rows.results }, 200, headers);
-  }
-  if (path === '/api/admin/upload' && request.method === 'POST') {
-    const form = await request.formData();
-    const file = form.get('file');
-    if (!(file instanceof File) || !uploadFileInfo(file.name)) {
-      return json({ error: '檔名不符合 date 規則，例如「115年 08 月維修報表.xlsx」「115年8月整新故障.xlsx」「115年 08 月維修報表-更正版2.xlsx」' }, 400, headers);
-    }
-    if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) return json({ error: 'Excel 大小需在 25 MB 以內' }, 400, headers);
-    const bytes = await file.arrayBuffer();
-    const sig = new Uint8Array(bytes.slice(0, 4));
-    if (!(sig[0] === 0x50 && sig[1] === 0x4b)) return json({ error: '檔案內容不是 .xlsx 格式' }, 400, headers);
-    const result = await githubUpload(env, file.name, bytes, `TITAN-STAR: upload ${file.name}`);
-    await log(env, admin.username, true, `excel_uploaded:${file.name}`, request, admin.id);
-    return json({ ok: true, commit: result.commit?.sha || '' }, 200, headers);
   }
   return json({ error: 'Not found' }, 404, headers);
 }

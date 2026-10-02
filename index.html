@@ -14,9 +14,9 @@
 <title>TITAN-STAR · 維修分析</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Iansui&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20261001-2">
-<link rel="stylesheet" href="rma-styles.css?v=20261001-2">
-<link rel="stylesheet" href="styles-morandi.css?v=20261001-2" id="morandiThemeLink">
+<link rel="stylesheet" href="styles.css?v=20261002-1">
+<link rel="stylesheet" href="rma-styles.css?v=20261002-1">
+<link rel="stylesheet" href="styles-morandi.css?v=20261002-1" id="morandiThemeLink">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
@@ -125,7 +125,8 @@
       <button class="btn theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="切換色系">🌙</button>
     </div>
     <button class="btn" id="changeOwnPasswordBtn" style="display:none" onclick="Auth.openChangePassword()">修改密碼</button>
-    <button class="btn" id="adminPanelBtn" style="display:none" onclick="Auth.openAdminPanel()" title="帳號、登入紀錄與 Excel 管理">⚙ 後台管理</button>
+    <button class="btn" id="adminPanelBtn" style="display:none" onclick="Auth.openAdminPanel()" title="帳號、權限、登入紀錄與 Excel 管理">⚙ 後台管理</button>
+    <button class="btn" id="reportUploadBtn" style="display:none" onclick="Auth.openAdminPanel()" title="上傳每月維修報表 Excel">⤒ 上傳報表</button>
     <button class="btn" id="logoutBtn" style="display:none" onclick="Auth.logout()" title="登出並清除此分頁的登入狀態">登出</button>
   </div>
 </div>
@@ -750,15 +751,15 @@
 <!-- RMA Modal container -->
 <div id="rmaModal" style="display:none;position:fixed;inset:0;z-index:600;align-items:center;justify-content:center"></div>
 
-<script src="parser.js?v=20261001-2"></script>
-<script src="analyzer.js?v=20261001-2"></script>
-<script src="privacy.js?v=20261001-2"></script>
-<script src="monthly-source.js?v=20261001-2"></script>
-<script src="app.js?v=20261001-2"></script>
-<script src="auth-config.js?v=20261001-2"></script>
-<script src="auth-worker.js?v=20261001-2"></script>
-<script src="report.js?v=20261001-2"></script>
-<script src="rma.js?v=20261001-2"></script>
+<script src="parser.js?v=20261002-1"></script>
+<script src="analyzer.js?v=20261002-1"></script>
+<script src="privacy.js?v=20261002-1"></script>
+<script src="monthly-source.js?v=20261002-1"></script>
+<script src="app.js?v=20261002-1"></script>
+<script src="auth-config.js?v=20261002-1"></script>
+<script src="auth-worker.js?v=20261002-1"></script>
+<script src="report.js?v=20261002-1"></script>
+<script src="rma.js?v=20261002-1"></script>
 <script>
 // ─── Theme toggle（深色 ↔ 莫蘭迪淺色）───
 const THEME_KEY = 'titan_theme';
@@ -924,10 +925,11 @@ async function onAuthSuccess() {
 <div id="adminPanel" class="ap-overlay" style="display:none" onclick="if(event.target===this)Auth.closeAdminPanel()">
   <div class="ap-box">
     <div class="ap-hdr">
-      <div class="ap-title">⚙ 帳號管理</div>
+      <div class="ap-title" id="adminPanelTitle">⚙ 帳號管理</div>
       <button class="ap-close" onclick="Auth.closeAdminPanel()">✕</button>
     </div>
     <div class="ap-body">
+      <div data-admin-only>
       <!-- Add user -->
       <div class="ap-sec-t">新增帳號</div>
       <div class="ap-add-row">
@@ -938,21 +940,34 @@ async function onAuthSuccess() {
           onkeydown="if(event.key==='Enter')Auth.addUser()"
           style="flex:1">
         <input class="ls-input" type="password" id="newTempPassword" placeholder="暫時密碼（至少10碼）" style="flex:1">
+        <select class="ls-input ap-perm-select" id="newUserPermission" aria-label="新帳號的權限群組" style="flex:0 0 150px">
+          <option value="viewer" selected>瀏覽權限</option>
+          <option value="uploader">更新報表權限</option>
+          <option value="admin">管理權限</option>
+        </select>
         <button class="btn primary" onclick="Auth.addUser()">新增</button>
+      </div>
+      <div class="ap-perm-legend">
+        <span><b class="ap-perm-tag perm-admin">管理權限</b>新增使用者、設定權限、上傳報表</span>
+        <span><b class="ap-perm-tag perm-uploader">更新報表權限</b>上傳報表、瀏覽分析資料</span>
+        <span><b class="ap-perm-tag perm-viewer">瀏覽權限</b>僅可瀏覽分析資料</span>
       </div>
       <div class="ls-err" id="addUserErr" style="margin-bottom:8px"></div>
       <!-- User list -->
       <div class="ap-sec-t" style="margin-top:18px">帳號列表</div>
       <div id="userListEl" class="ap-user-list"></div>
-      <div class="ap-note">新帳號與重設密碼由 Cloudflare Worker 保存；使用者下次登入必須先修改暫時密碼。</div>
+      <div class="ap-note">新帳號與重設密碼由 Cloudflare Worker 保存；使用者下次登入必須先修改暫時密碼。變更權限後，對方需重新登入才會套用。可設定多位管理權限帳號，但至少要保留一位。</div>
+      </div>
       <div class="ap-sec-t" style="margin-top:18px">上傳每月 Excel</div>
       <input type="file" id="adminUploadInput" accept=".xlsx" onchange="Auth.uploadExcel(this)">
       <div class="ap-note">檔名須符合 date 資料夾規則；後台會安全提交至 GitHub。</div>
       <!-- Login log -->
+      <div data-admin-only>
       <div class="ap-sec-t" style="margin-top:24px;display:flex;align-items:center;justify-content:space-between">
         <span>登入與操作紀錄（伺服器，最新 200 筆，不可刪除）</span>
       </div>
       <div id="loginLogEl" style="max-height:220px;overflow-y:auto;padding:4px 0"></div>
+      </div>
     </div>
   </div>
 </div>

@@ -392,7 +392,11 @@ window.App = (function () {
     el.hidden = false;
     const prev = RepairMonthlySource.calendarPrevious(latest);
     const selected = state.selectedMonths.length ? state.selectedMonths.slice().sort() : months;
-    const selectedLabel = selected.length === 1 ? fmt.monthLabel(selected[0]) : fmt.monthLabel(selected[0]) + ' – ' + fmt.monthLabel(selected[selected.length - 1]);
+    // 連續月份顯示「起 – 迄」；Ctrl 複選出不連續的月份時逐一列出，避免看起來像整段區間
+    const contiguous = selected.every((m, i) => i === 0 || RepairMonthlySource.calendarPrevious(m) === selected[i - 1]);
+    const selectedLabel = selected.length === 1 ? fmt.monthLabel(selected[0])
+      : contiguous ? fmt.monthLabel(selected[0]) + ' – ' + fmt.monthLabel(selected[selected.length - 1])
+      : selected.map(fmt.monthLabel).join('、');
     const gaps = [];
     for (let m = latest; m >= months[0]; m = RepairMonthlySource.calendarPrevious(m)) if (!months.includes(m)) gaps.push(fmt.monthLabel(m));
     $('monthlyContextTitle').textContent = '分析期間 ' + selectedLabel;
@@ -792,13 +796,13 @@ window.App = (function () {
 
     // Month chips（維修件數 + 整新數）
     const mc = $('monthChips');
-    mc.innerHTML = '<div class="sb-label">月份</div>'
+    mc.innerHTML = '<div class="sb-label" title="點選＝只看該月份；Ctrl（Mac 為 ⌘）＋點選＝加入或移除該月份">月份<small class="sb-hint">Ctrl＋點選可複選</small></div>'
       + `<button class="chip ${all ? 'active' : ''}" onclick="App.setMonth('__ALL__')">全部月份 <span class="num">${months.length} 個月</span>${allDenom ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(allDenom)} 台</span>` : ''}</button>`
       + months.map(mk => {
         const sel = !all && state.selectedMonths.includes(mk);
         const m = state.db.months[mk];
         const den = monthDenom[mk];
-        return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setMonth('${mk}')">${fmt.monthLabel(mk)} <span class="num">RMA 返維修課 ${fmt.int(m.records.length)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
+        return `<button class="chip ${sel ? 'active' : ''}" onclick="App.setMonth('${mk}', event.ctrlKey || event.metaKey)" title="點選＝只看 ${fmt.monthLabel(mk)}；Ctrl＋點選＝加入／移除">${fmt.monthLabel(mk)} <span class="num">RMA 返維修課 ${fmt.int(m.records.length)} 台</span>${den ? `<span class="num-den" title="正常整新流程的作業數量">正常整新流程 ${fmt.int(den)} 台</span>` : ''}</button>`;
       }).join('');
 
     // Mobile month select（完整標示維修筆數；窄螢幕由 CSS 改為上下排列）
@@ -919,24 +923,28 @@ window.App = (function () {
     }
   }
 
-  function setMonth(mk) {
+  // 月份選擇：一般點選＝只看該月份；Ctrl／⌘＋點選＝把該月份加入或移出目前的選擇（複選）
+  function setMonth(mk, additive = false) {
     const allMonths = Object.keys(state.db.months).sort();
     if (mk === '__ALL__') {
       state.selectedMonths = allMonths.slice();
+    } else if (!additive) {
+      state.selectedMonths = [mk];
     } else {
-      const all = state.selectedMonths.length === allMonths.length;
+      const all = state.selectedMonths.length === 0 || state.selectedMonths.length === allMonths.length;
       if (all) {
-        state.selectedMonths = [mk];
+        state.selectedMonths = [mk];   // 從「全部月份」開始複選：先只留這個月
       } else if (state.selectedMonths.includes(mk)) {
         state.selectedMonths = state.selectedMonths.filter(m => m !== mk);
         if (state.selectedMonths.length === 0) state.selectedMonths = allMonths.slice();
       } else {
-        state.selectedMonths.push(mk);
+        state.selectedMonths = [...state.selectedMonths, mk].sort();
       }
     }
     renderAll();
     saveFilterState();
-    collapseSubbar();
+    // 複選時保持篩選列展開，方便繼續點選其他月份
+    if (!additive) collapseSubbar();
   }
   function setMonthDirect(mk) {
     const allMonths = Object.keys(state.db.months).sort();
